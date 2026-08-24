@@ -39,7 +39,6 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ErrorResponse> respond(ErrorCode code, String message) {
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
-        ErrorResponse body = new ErrorResponse(code.name(), message, code.retryable(), requestId);
-        return ResponseEntity.status(code.httpStatus()).body(body);
+        return ResponseEntity.status(code.httpStatus()).body(ErrorResponse.of(code, message, requestId));
     }
 }

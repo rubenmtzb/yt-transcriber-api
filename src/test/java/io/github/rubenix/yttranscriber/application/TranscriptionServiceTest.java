@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -144,6 +145,38 @@ class TranscriptionServiceTest {
         service.process("https://youtu.be/abc123", "es", "session-1");
 
         assertThat(service.process("https://youtu.be/abc123", "es", "session-2")).isNotNull();
+    }
+
+    @Test
+    void reportsProgressThroughTheCaptionPathWithoutATranscribingStage() {
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", captionSegments));
+        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+
+        List<ProcessingStage> reported = new ArrayList<>();
+        transcriptionService.process("https://youtu.be/abc123", "es", "session-1", reported::add);
+
+        assertThat(reported).containsExactly(
+                ProcessingStage.RESOLVING_VIDEO, ProcessingStage.TRANSLATING, ProcessingStage.PREPARING_RESULT);
+    }
+
+    @Test
+    void reportsATranscribingStageWhenFallingBackToSpeechToText() {
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, null, List.of()));
+        List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
+        when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("en", transcribed));
+        when(translationService.translate(transcribed, "en", "es")).thenReturn(List.of());
+
+        List<ProcessingStage> reported = new ArrayList<>();
+        transcriptionService.process("https://youtu.be/abc123", "es", "session-1", reported::add);
+
+        assertThat(reported).containsExactly(
+                ProcessingStage.RESOLVING_VIDEO, ProcessingStage.TRANSCRIBING,
+                ProcessingStage.TRANSLATING, ProcessingStage.PREPARING_RESULT);
     }
 
     @Test

@@ -48,9 +48,20 @@ public class TranscriptionService {
     }
 
     public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId) {
+        return process(youtubeUrl, targetLanguage, sessionId, ProgressListener.NOOP);
+    }
+
+    /**
+     * Same use case, reporting real progress as it happens (used by the SSE streaming endpoint).
+     * VALIDATING_URL isn't reported here -- it's already done by the time this method runs
+     * (request-shape validation happens at the controller boundary) -- the caller emits it itself
+     * the moment the stream opens.
+     */
+    public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId, ProgressListener progress) {
         usageLimiter.checkAndRecordRequest(sessionId);
 
         return capacityGuard.runWithinCapacity(() -> {
+            progress.onStage(ProcessingStage.RESOLVING_VIDEO);
             SourceResolution resolution = sourceResolutionService.resolve(youtubeUrl);
             requireWithinDurationLimit(resolution.video().durationSeconds());
             usageLimiter.checkAndRecordAudioMinutes(sessionId, resolution.video().durationSeconds());
@@ -58,6 +69,7 @@ public class TranscriptionService {
             String sourceLanguage;
             List<TranscriptSegment> segments;
             if (resolution.segments().isEmpty()) {
+                progress.onStage(ProcessingStage.TRANSCRIBING);
                 TranscriptionOutcome outcome = transcriptionProvider.transcribe(
                         new TranscriptionRequest(youtubeUrl, resolution.video(), resolution.sourceLanguage()));
                 sourceLanguage = outcome.language();
@@ -67,9 +79,11 @@ public class TranscriptionService {
                 segments = resolution.segments();
             }
 
+            progress.onStage(ProcessingStage.TRANSLATING);
             List<TranscriptSegment> grouped = sentenceGrouper.group(segments);
             List<TranslatedSegment> translated = translationService.translate(grouped, sourceLanguage, targetLanguage);
 
+            progress.onStage(ProcessingStage.PREPARING_RESULT);
             return new TranscriptionResult(resolution.video(), sourceLanguage, targetLanguage, translated);
         });
     }
