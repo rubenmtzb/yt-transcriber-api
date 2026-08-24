@@ -7,7 +7,7 @@ import io.github.rubenix.yttranscriber.domain.translation.TranslationProvider;
 import io.github.rubenix.yttranscriber.domain.translation.TranslationRequest;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.RateLimitedException;
-import org.springframework.http.HttpStatusCode;
+import io.github.rubenix.yttranscriber.exception.TranslationQuotaExceededException;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -74,19 +74,22 @@ public class DeepLTranslationProvider implements TranslationProvider {
                     .retrieve()
                     .body(DeepLResponse.class);
         } catch (RestClientResponseException e) {
-            // DeepL uses 429 for per-minute rate limiting and 456 for the monthly quota being
-            // exhausted; both are "try again later", not "the service is down".
-            if (isRateLimitStatus(e.getStatusCode())) {
+            // DeepL uses 429 for per-minute rate limiting (clears in moments, worth a short
+            // retry) and 456 for the monthly character quota being exhausted (a free-tier demo
+            // limit that only resets next month, not something retrying now will fix) -- these
+            // need distinct handling so the UI doesn't invite the user to just "try again".
+            int status = e.getStatusCode().value();
+            if (status == 429) {
                 throw new RateLimitedException("The translation provider's usage limit has been reached.");
+            }
+            if (status == 456) {
+                throw new TranslationQuotaExceededException(
+                        "This demo's monthly translation quota has been used up.");
             }
             throw new ProviderUnavailableException("DeepL translation request failed.");
         } catch (RestClientException e) {
             throw new ProviderUnavailableException("DeepL translation request failed.");
         }
-    }
-
-    private boolean isRateLimitStatus(HttpStatusCode status) {
-        return status.value() == 429 || status.value() == 456;
     }
 
     private List<TranslatedSegment> zip(List<TranscriptSegment> segments, List<DeepLTranslation> translations) {

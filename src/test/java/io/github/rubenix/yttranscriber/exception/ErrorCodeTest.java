@@ -23,6 +23,7 @@ class ErrorCodeTest {
         assertThat(ErrorCode.INVALID_REQUEST.retryable()).isFalse();
         assertThat(ErrorCode.UNSUPPORTED_SOURCE.retryable()).isFalse();
         assertThat(ErrorCode.VIDEO_TOO_LONG.retryable()).isFalse();
+        assertThat(ErrorCode.TRANSLATION_QUOTA_EXCEEDED.retryable()).isFalse();
         assertThat(ErrorCode.INTERNAL_ERROR.retryable()).isFalse();
     }
 
@@ -33,6 +34,7 @@ class ErrorCodeTest {
         assertThat(ErrorCode.VIDEO_TOO_LONG.httpStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE);
         assertThat(ErrorCode.RATE_LIMITED.httpStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(ErrorCode.PROVIDER_UNAVAILABLE.httpStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(ErrorCode.TRANSLATION_QUOTA_EXCEEDED.httpStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(ErrorCode.INTERNAL_ERROR.httpStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }

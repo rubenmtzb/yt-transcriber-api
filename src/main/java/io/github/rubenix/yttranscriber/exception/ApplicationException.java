@@ -1,7 +1,8 @@
 package io.github.rubenix.yttranscriber.exception;
 
 public sealed abstract class ApplicationException extends RuntimeException
-        permits UnsupportedSourceException, VideoTooLongException, RateLimitedException, ProviderUnavailableException {
+        permits UnsupportedSourceException, VideoTooLongException, RateLimitedException, ProviderUnavailableException,
+        TranslationQuotaExceededException {
 
     private final ErrorCode errorCode;
 

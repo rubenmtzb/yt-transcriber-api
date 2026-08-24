@@ -5,9 +5,8 @@ import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
 import io.github.rubenix.yttranscriber.domain.translation.TranslationRequest;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.RateLimitedException;
+import io.github.rubenix.yttranscriber.exception.TranslationQuotaExceededException;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -68,18 +67,31 @@ class DeepLTranslationProviderTest {
         server.verify();
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {429, 456})
-    void mapsDeepLRateAndQuotaLimitsToRateLimitedException(int deepLStatus) {
+    @Test
+    void mapsDeepLPerMinuteRateLimitToRateLimitedException() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("https://api-free.deepl.com/v2/translate"))
-                .andRespond(withStatus(HttpStatusCode.valueOf(deepLStatus)));
+                .andRespond(withStatus(HttpStatusCode.valueOf(429)));
 
         var provider = new DeepLTranslationProvider(builder, new DeepLProperties("test-key:fx"));
         var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "en", "es");
 
         assertThatThrownBy(() -> provider.translate(request))
                 .isInstanceOf(RateLimitedException.class);
+    }
+
+    @Test
+    void mapsDeepLMonthlyQuotaExhaustionToTranslationQuotaExceededException() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api-free.deepl.com/v2/translate"))
+                .andRespond(withStatus(HttpStatusCode.valueOf(456)));
+
+        var provider = new DeepLTranslationProvider(builder, new DeepLProperties("test-key:fx"));
+        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "en", "es");
+
+        assertThatThrownBy(() -> provider.translate(request))
+                .isInstanceOf(TranslationQuotaExceededException.class);
     }
 }
