@@ -4,6 +4,7 @@ import io.github.rubenix.yttranscriber.config.ProcessingLimitsProperties;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionProvider;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
 import io.github.rubenix.yttranscriber.exception.RateLimitedException;
@@ -68,10 +69,10 @@ class TranscriptionServiceTest {
     void transcribesWhenTheSourceHasNoReadyMadeSegments() {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", List.of()));
+                .thenReturn(new SourceResolution(video, null, List.of()));
 
         List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
-        when(transcriptionProvider.transcribe(any())).thenReturn(transcribed);
+        when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("en", transcribed));
 
         List<TranslatedSegment> translated = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
         when(translationService.translate(transcribed, "en", "es")).thenReturn(translated);
@@ -80,6 +81,24 @@ class TranscriptionServiceTest {
 
         assertThat(result.video()).isEqualTo(video);
         assertThat(result.segments()).isEqualTo(translated);
+    }
+
+    @Test
+    void usesTheLanguageDetectedBySpeechToTextRatherThanAnyUpstreamHint() {
+        // The source provider only ever passes a *hint* (e.g. yt-dlp's declared video language,
+        // which can be wrong or absent) when there are no captions to derive it from -- real STT
+        // detects the language itself, and that's what must end up in the final result.
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", List.of()));
+
+        List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hola a todos"));
+        when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("es", transcribed));
+        when(translationService.translate(transcribed, "es", "en")).thenReturn(List.of());
+
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "en", "session-1");
+
+        assertThat(result.sourceLanguage()).isEqualTo("es");
     }
 
     @Test

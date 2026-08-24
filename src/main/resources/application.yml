@@ -23,6 +23,10 @@ app:
   ytdlp:
     binary-path: ${YTDLP_BINARY_PATH:yt-dlp}
     timeout-seconds: ${YTDLP_TIMEOUT_SECONDS:45}
+  whisper:
+    binary-path: ${WHISPER_BINARY_PATH:whisper-cli}
+    model-path: ${WHISPER_MODEL_PATH:}
+    timeout-seconds: ${WHISPER_TIMEOUT_SECONDS:900}
   deepl:
     api-key: ${TRANSLATION_API_KEY:}
   cors:

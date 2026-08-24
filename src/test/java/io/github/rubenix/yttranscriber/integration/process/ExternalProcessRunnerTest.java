@@ -1,4 +1,4 @@
-package io.github.rubenix.yttranscriber.integration.youtube;
+package io.github.rubenix.yttranscriber.integration.process;
 
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import org.junit.jupiter.api.Test;
@@ -9,9 +9,9 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class YtDlpProcessRunnerTest {
+class ExternalProcessRunnerTest {
 
-    private final YtDlpProcessRunner runner = new YtDlpProcessRunner();
+    private final ExternalProcessRunner runner = new ExternalProcessRunner();
 
     @Test
     void capturesStdoutAndExitCodeOfASuccessfulCommand() {

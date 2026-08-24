@@ -3,6 +3,7 @@ package io.github.rubenix.yttranscriber.application;
 import io.github.rubenix.yttranscriber.config.ProcessingLimitsProperties;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionProvider;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionRequest;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
@@ -54,14 +55,22 @@ public class TranscriptionService {
             requireWithinDurationLimit(resolution.video().durationSeconds());
             usageLimiter.checkAndRecordAudioMinutes(sessionId, resolution.video().durationSeconds());
 
-            List<TranscriptSegment> segments = resolution.segments().isEmpty()
-                    ? transcriptionProvider.transcribe(new TranscriptionRequest(resolution.video(), resolution.sourceLanguage()))
-                    : resolution.segments();
+            String sourceLanguage;
+            List<TranscriptSegment> segments;
+            if (resolution.segments().isEmpty()) {
+                TranscriptionOutcome outcome = transcriptionProvider.transcribe(
+                        new TranscriptionRequest(youtubeUrl, resolution.video(), resolution.sourceLanguage()));
+                sourceLanguage = outcome.language();
+                segments = outcome.segments();
+            } else {
+                sourceLanguage = resolution.sourceLanguage();
+                segments = resolution.segments();
+            }
 
             List<TranscriptSegment> grouped = sentenceGrouper.group(segments);
-            List<TranslatedSegment> translated = translationService.translate(grouped, resolution.sourceLanguage(), targetLanguage);
+            List<TranslatedSegment> translated = translationService.translate(grouped, sourceLanguage, targetLanguage);
 
-            return new TranscriptionResult(resolution.video(), resolution.sourceLanguage(), targetLanguage, translated);
+            return new TranscriptionResult(resolution.video(), sourceLanguage, targetLanguage, translated);
         });
     }
 

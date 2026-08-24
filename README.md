@@ -79,21 +79,26 @@ docker run -p 8080:8080 --env-file .env yt-transcriber-api
 
 Copy `.env.example` to `.env` and fill in the values you need locally.
 
-| Variable                     | Default   | Description                                              |
-|-------------------------------|-----------|------------------------------------------------------------|
-| `SPEECH_API_KEY`              | (empty)   | Reserved for a future Speech-to-Text provider (unused)     |
-| `TRANSLATION_API_KEY`         | (empty)   | DeepL API key. Without it, translation fails with `PROVIDER_UNAVAILABLE` |
-| `MAX_VIDEO_DURATION_SECONDS`  | 1200      | Longest video accepted (20 minutes)                         |
-| `MAX_REQUESTS_PER_HOUR`       | 3         | Processings per session per hour                            |
-| `MAX_AUDIO_MINUTES_PER_HOUR`  | 60        | Audio-minutes budget per hour                               |
-| `YTDLP_BINARY_PATH`           | `yt-dlp`  | Path to the yt-dlp executable                               |
-| `YTDLP_TIMEOUT_SECONDS`       | 45        | Timeout for each yt-dlp subprocess call                     |
+| Variable                       | Default        | Description                                              |
+|---------------------------------|----------------|------------------------------------------------------------|
+| `TRANSLATION_API_KEY`           | (empty)        | DeepL API key. Without it, translation fails with `PROVIDER_UNAVAILABLE` |
+| `MAX_VIDEO_DURATION_SECONDS`    | 1200           | Longest video accepted (20 minutes)                         |
+| `MAX_REQUESTS_PER_HOUR`         | 3              | Processings per session per hour                            |
+| `MAX_AUDIO_MINUTES_PER_HOUR`    | 60             | Audio-minutes budget per hour                               |
+| `MAX_CONCURRENT_TRANSCRIPTIONS` | 2              | Global cap on transcriptions processed at once               |
+| `YTDLP_BINARY_PATH`             | `yt-dlp`       | Path to the yt-dlp executable                               |
+| `YTDLP_TIMEOUT_SECONDS`         | 45             | Timeout for each yt-dlp subprocess call                     |
+| `WHISPER_BINARY_PATH`           | `whisper-cli`  | Path to the whisper.cpp CLI executable                       |
+| `WHISPER_MODEL_PATH`            | (empty)        | Path to a ggml model file. Empty disables local Speech-to-Text (videos with no captions in any language then fail with `PROVIDER_UNAVAILABLE` instead of transcribing) |
+| `WHISPER_TIMEOUT_SECONDS`       | 900            | Timeout for audio extraction + whisper-cli combined           |
 
 Actuator exposure: `health`, `info`, `metrics`, `prometheus` — see `application.yml`.
 
 ### Local requirements
 
-`yt-dlp` must be installed and on `PATH` (`brew install yt-dlp` on macOS). It depends on `deno` to solve YouTube's bot-detection challenges — Homebrew installs it automatically as a dependency.
+`yt-dlp` must be installed and on `PATH` (`brew install yt-dlp` on macOS). It depends on `deno` to solve YouTube's bot-detection challenges — Homebrew installs it automatically as a dependency. `ffmpeg` must also be on `PATH` (needed by yt-dlp's audio extraction for the Speech-to-Text fallback).
+
+Speech-to-Text for videos with no captions in any language runs entirely locally via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — no external API, no per-request cost. Install it with `brew install whisper-cpp`, download a multilingual ggml model (e.g. `ggml-base.bin`, ~140MB) from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main), and point `WHISPER_MODEL_PATH` at it. Bigger models (`small`, `medium`) trade latency for accuracy. CPU-only inference (no GPU, e.g. in Docker) is meaningfully slower than a Mac's Metal-accelerated GPU — budget accordingly with `WHISPER_TIMEOUT_SECONDS`.
 
 ## Project Structure
 

@@ -7,7 +7,8 @@ import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.UnsupportedSourceException;
-import io.github.rubenix.yttranscriber.integration.youtube.YtDlpProcessRunner.ProcessResult;
+import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner;
+import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner.ProcessResult;
 import io.github.rubenix.yttranscriber.integration.youtube.YtDlpSourceProvider.CaptionTrack;
 import io.github.rubenix.yttranscriber.integration.youtube.YtDlpSourceProvider.RawVideoInfo;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +34,7 @@ class YtDlpSourceProviderTest {
     private static final YtDlpProperties PROPERTIES = new YtDlpProperties("yt-dlp", 30);
 
     @Mock
-    private YtDlpProcessRunner processRunner;
+    private ExternalProcessRunner processRunner;
 
     private YtDlpSourceProvider sourceProvider;
 
@@ -181,6 +182,22 @@ class YtDlpSourceProviderTest {
 
         assertThat(resolution.sourceLanguage()).isEqualTo("ru");
         assertThat(resolution.segments()).hasSize(2);
+    }
+
+    @Test
+    void returnsEmptySegmentsInsteadOfThrowingWhenThereAreNoCaptionsInAnyLanguage() {
+        // No captions at all is not a dead end -- TranscriptionService reads empty segments as
+        // "fall back to real Speech-to-Text" (see WhisperTranscriptionProvider), so this must
+        // resolve successfully, not throw.
+        when(processRunner.run(any(), any())).thenReturn(new ProcessResult(0, """
+                {"id": "silent123", "title": "No captions anywhere", "duration": 60, "availability": "public",
+                 "is_live": false, "language": null, "subtitles": {}, "automatic_captions": {}}
+                """, ""));
+
+        SourceResolution resolution = sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=silent123"));
+
+        assertThat(resolution.segments()).isEmpty();
+        assertThat(resolution.video().id()).isEqualTo("silent123");
     }
 
     private static final String SAMPLE_JSON3 = """

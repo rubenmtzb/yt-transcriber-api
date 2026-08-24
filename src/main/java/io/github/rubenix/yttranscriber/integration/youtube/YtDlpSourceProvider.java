@@ -10,6 +10,7 @@ import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.UnsupportedSourceException;
+import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -40,11 +41,11 @@ public class YtDlpSourceProvider implements SourceProvider {
     // "es-ES-7eCR4kqQbL4", which are a real track id appended to the language, not a real tag.
     private static final Pattern CLEAN_LANGUAGE_CODE = Pattern.compile("^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$");
 
-    private final YtDlpProcessRunner processRunner;
+    private final ExternalProcessRunner processRunner;
     private final ObjectMapper objectMapper;
     private final YtDlpProperties properties;
 
-    public YtDlpSourceProvider(YtDlpProcessRunner processRunner, ObjectMapper objectMapper, YtDlpProperties properties) {
+    public YtDlpSourceProvider(ExternalProcessRunner processRunner, ObjectMapper objectMapper, YtDlpProperties properties) {
         this.processRunner = processRunner;
         this.objectMapper = objectMapper;
         this.properties = properties;
@@ -54,11 +55,18 @@ public class YtDlpSourceProvider implements SourceProvider {
     public SourceResolution resolve(SourceRequest request) {
         RawVideoInfo info = fetchRawInfo(request.youtubeUrl());
         VideoMetadata video = toVideoMetadata(info);
-        CaptionTrack track = selectCaptionTrack(info)
-                .orElseThrow(() -> new UnsupportedSourceException(
-                        "No captions are available for this video in any language."));
-        List<TranscriptSegment> segments = fetchSegments(request.youtubeUrl(), video.id(), track);
-        return new SourceResolution(video, track.language(), segments);
+
+        Optional<CaptionTrack> track = selectCaptionTrack(info);
+        if (track.isEmpty()) {
+            // No usable captions in any language -- not a dead end. Empty segments tells
+            // TranscriptionService to fall back to real Speech-to-Text (TranscriptionProvider).
+            // info.language() is passed through as a hint (may be null); Whisper auto-detects
+            // on its own when it's absent.
+            return new SourceResolution(video, info.language(), List.of());
+        }
+
+        List<TranscriptSegment> segments = fetchSegments(request.youtubeUrl(), video.id(), track.get());
+        return new SourceResolution(video, track.get().language(), segments);
     }
 
     VideoMetadata fetchMetadata(String youtubeUrl) {

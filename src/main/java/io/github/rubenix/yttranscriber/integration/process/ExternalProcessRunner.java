@@ -1,4 +1,4 @@
-package io.github.rubenix.yttranscriber.integration.youtube;
+package io.github.rubenix.yttranscriber.integration.process;
 
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import org.springframework.stereotype.Component;
@@ -14,10 +14,11 @@ import java.util.concurrent.TimeUnit;
 /**
  * Runs an external command with a bounded timeout, capturing stdout and stderr on separate
  * threads to avoid the classic ProcessBuilder deadlock where an unread stream fills its pipe
- * buffer and blocks the child process. Knows nothing about yt-dlp specifically.
+ * buffer and blocks the child process. Knows nothing about any specific binary -- shared by every
+ * integration that shells out to an external tool (yt-dlp, whisper-cli, ...).
  */
 @Component
-public class YtDlpProcessRunner {
+public class ExternalProcessRunner {
 
     public record ProcessResult(int exitCode, String stdout, String stderr) {
     }
