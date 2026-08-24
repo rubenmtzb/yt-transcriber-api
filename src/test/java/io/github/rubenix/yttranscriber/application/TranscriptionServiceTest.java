@@ -40,7 +40,8 @@ class TranscriptionServiceTest {
 
     @BeforeEach
     void setUp() {
-        transcriptionService = new TranscriptionService(sourceResolutionService, transcriptionProvider, translationService, LIMITS);
+        transcriptionService = new TranscriptionService(
+                sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService, LIMITS);
     }
 
     @Test

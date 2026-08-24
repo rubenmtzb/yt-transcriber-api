@@ -20,15 +20,18 @@ public class TranscriptionService {
 
     private final SourceResolutionService sourceResolutionService;
     private final TranscriptionProvider transcriptionProvider;
+    private final SentenceGrouper sentenceGrouper;
     private final TranslationService translationService;
     private final ProcessingLimitsProperties limits;
 
     public TranscriptionService(SourceResolutionService sourceResolutionService,
                                  TranscriptionProvider transcriptionProvider,
+                                 SentenceGrouper sentenceGrouper,
                                  TranslationService translationService,
                                  ProcessingLimitsProperties limits) {
         this.sourceResolutionService = sourceResolutionService;
         this.transcriptionProvider = transcriptionProvider;
+        this.sentenceGrouper = sentenceGrouper;
         this.translationService = translationService;
         this.limits = limits;
     }
@@ -41,7 +44,8 @@ public class TranscriptionService {
                 ? transcriptionProvider.transcribe(new TranscriptionRequest(resolution.video(), resolution.sourceLanguage()))
                 : resolution.segments();
 
-        List<TranslatedSegment> translated = translationService.translate(segments, resolution.sourceLanguage(), targetLanguage);
+        List<TranscriptSegment> grouped = sentenceGrouper.group(segments);
+        List<TranslatedSegment> translated = translationService.translate(grouped, resolution.sourceLanguage(), targetLanguage);
 
         return new TranscriptionResult(resolution.video(), resolution.sourceLanguage(), targetLanguage, translated);
     }
