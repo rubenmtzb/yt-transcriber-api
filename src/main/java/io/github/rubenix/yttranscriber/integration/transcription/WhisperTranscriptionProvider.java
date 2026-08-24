@@ -54,6 +54,14 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
         if (whisperProperties.modelPath() == null || whisperProperties.modelPath().isBlank()) {
             throw new ProviderUnavailableException("No local transcription model is configured yet.");
         }
+        if (request.video().durationSeconds() < whisperProperties.minAudioDurationSeconds()) {
+            // Confirmed empirically: Whisper's language auto-detection is unreliable on clips
+            // shorter than ~10s (misidentified a 6.5s English clip as Spanish and transcribed
+            // gibberish). Below the configured floor, refuse rather than risk a wrong transcript.
+            throw new UnsupportedSourceException(
+                    "This video is too short to transcribe reliably (minimum %d seconds)."
+                            .formatted(whisperProperties.minAudioDurationSeconds()));
+        }
 
         Path tempDir = createTempDirectory();
         try {

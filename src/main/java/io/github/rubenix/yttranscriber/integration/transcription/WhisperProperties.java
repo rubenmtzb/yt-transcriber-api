@@ -9,5 +9,5 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * when modelPath is blank, instead of the app refusing to boot.
  */
 @ConfigurationProperties(prefix = "app.whisper")
-public record WhisperProperties(String binaryPath, String modelPath, long timeoutSeconds) {
+public record WhisperProperties(String binaryPath, String modelPath, long timeoutSeconds, long minAudioDurationSeconds) {
 }

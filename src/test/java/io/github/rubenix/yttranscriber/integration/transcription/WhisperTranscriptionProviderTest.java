@@ -32,8 +32,8 @@ import static org.mockito.Mockito.when;
 class WhisperTranscriptionProviderTest {
 
     private static final YtDlpProperties YTDLP_PROPERTIES = new YtDlpProperties("yt-dlp", 45);
-    private static final WhisperProperties CONFIGURED = new WhisperProperties("whisper-cli", "/models/ggml-base.bin", 60);
-    private static final WhisperProperties UNCONFIGURED = new WhisperProperties("whisper-cli", "", 60);
+    private static final WhisperProperties CONFIGURED = new WhisperProperties("whisper-cli", "/models/ggml-base.bin", 60, 15);
+    private static final WhisperProperties UNCONFIGURED = new WhisperProperties("whisper-cli", "", 60, 15);
 
     @Mock
     private ExternalProcessRunner processRunner;
@@ -46,8 +46,12 @@ class WhisperTranscriptionProviderTest {
     }
 
     private TranscriptionRequest request(String sourceLanguageHint) {
+        return requestWithDuration(sourceLanguageHint, 90);
+    }
+
+    private TranscriptionRequest requestWithDuration(String sourceLanguageHint, long durationSeconds) {
         return new TranscriptionRequest(
-                "https://www.youtube.com/watch?v=abc123", new VideoMetadata("abc123", "Title", 90), sourceLanguageHint);
+                "https://www.youtube.com/watch?v=abc123", new VideoMetadata("abc123", "Title", durationSeconds), sourceLanguageHint);
     }
 
     @Test
@@ -57,6 +61,16 @@ class WhisperTranscriptionProviderTest {
 
         assertThatThrownBy(() -> unconfigured.transcribe(request(null)))
                 .isInstanceOf(ProviderUnavailableException.class);
+        verify(processRunner, never()).run(any(), any());
+    }
+
+    @Test
+    void rejectsVideosShorterThanTheConfiguredMinimumWithoutCallingAnything() {
+        // Confirmed empirically: Whisper's language auto-detection is unreliable under ~10s of
+        // audio (misidentified a 6.5s English clip as Spanish). This guards against ever hitting
+        // that failure mode in production rather than just documenting it.
+        assertThatThrownBy(() -> provider.transcribe(requestWithDuration(null, 10)))
+                .isInstanceOf(UnsupportedSourceException.class);
         verify(processRunner, never()).run(any(), any());
     }
 

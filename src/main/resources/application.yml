@@ -27,6 +27,7 @@ app:
     binary-path: ${WHISPER_BINARY_PATH:whisper-cli}
     model-path: ${WHISPER_MODEL_PATH:}
     timeout-seconds: ${WHISPER_TIMEOUT_SECONDS:900}
+    min-audio-duration-seconds: ${WHISPER_MIN_AUDIO_DURATION_SECONDS:15}
   deepl:
     api-key: ${TRANSLATION_API_KEY:}
   cors:

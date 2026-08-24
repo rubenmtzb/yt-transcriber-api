@@ -91,6 +91,7 @@ Copy `.env.example` to `.env` and fill in the values you need locally.
 | `WHISPER_BINARY_PATH`           | `whisper-cli`  | Path to the whisper.cpp CLI executable                       |
 | `WHISPER_MODEL_PATH`            | (empty)        | Path to a ggml model file. Empty disables local Speech-to-Text (videos with no captions in any language then fail with `PROVIDER_UNAVAILABLE` instead of transcribing) |
 | `WHISPER_TIMEOUT_SECONDS`       | 900            | Timeout for audio extraction + whisper-cli combined           |
+| `WHISPER_MIN_AUDIO_DURATION_SECONDS` | 15        | Videos shorter than this skip Speech-to-Text (language auto-detection is unreliable on very short clips) |
 
 Actuator exposure: `health`, `info`, `metrics`, `prometheus` — see `application.yml`.
 
