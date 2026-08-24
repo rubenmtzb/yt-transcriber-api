@@ -33,7 +33,7 @@ class TranscriptionControllerTest {
     void returnsTheTranscriptionForAValidRequest() throws Exception {
         VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
         List<TranslatedSegment> segments = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
-        when(transcriptionService.process(anyString(), anyString()))
+        when(transcriptionService.process(anyString(), anyString(), anyString()))
                 .thenReturn(new TranscriptionResult(video, "en", "es", segments));
 
         mockMvc.perform(post("/api/v1/transcriptions")
@@ -73,7 +73,7 @@ class TranscriptionControllerTest {
     @Test
     void acceptsRealWorldYoutubeUrlShapesThatArentJustWatchVEqualsFirst() throws Exception {
         VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
-        when(transcriptionService.process(anyString(), anyString()))
+        when(transcriptionService.process(anyString(), anyString(), anyString()))
                 .thenReturn(new TranscriptionResult(video, "en", "es", List.of()));
 
         // playlist link where "v" isn't the first query param, m.youtube.com, and Shorts
@@ -90,7 +90,7 @@ class TranscriptionControllerTest {
 
     @Test
     void mapsProviderUnavailableToServiceUnavailable() throws Exception {
-        when(transcriptionService.process(anyString(), anyString()))
+        when(transcriptionService.process(anyString(), anyString(), anyString()))
                 .thenThrow(new ProviderUnavailableException("No source provider is configured yet."));
 
         mockMvc.perform(post("/api/v1/transcriptions")

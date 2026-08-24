@@ -3,9 +3,11 @@ package io.github.rubenix.yttranscriber.api;
 import io.github.rubenix.yttranscriber.api.dto.TranscriptionRequestDto;
 import io.github.rubenix.yttranscriber.api.dto.TranscriptionResponseDto;
 import io.github.rubenix.yttranscriber.application.TranscriptionService;
+import io.github.rubenix.yttranscriber.limiter.SessionIdFilter;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -23,8 +25,9 @@ public class TranscriptionController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.OK)
-    public TranscriptionResponseDto create(@Valid @RequestBody TranscriptionRequestDto request) {
-        var result = transcriptionService.process(request.youtubeUrl(), request.targetLanguage());
+    public TranscriptionResponseDto create(@Valid @RequestBody TranscriptionRequestDto request,
+                                            @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId) {
+        var result = transcriptionService.process(request.youtubeUrl(), request.targetLanguage(), sessionId);
         return TranscriptionResponseDto.from(result);
     }
 }

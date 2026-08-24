@@ -9,5 +9,6 @@ import org.springframework.validation.annotation.Validated;
 public record ProcessingLimitsProperties(
         @Min(1) long maxVideoDurationSeconds,
         @Min(1) int maxRequestsPerHour,
-        @Min(1) long maxAudioMinutesPerHour) {
+        @Min(1) long maxAudioMinutesPerHour,
+        @Min(1) int maxConcurrentTranscriptions) {
 }

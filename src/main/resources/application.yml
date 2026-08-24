@@ -19,6 +19,7 @@ app:
     max-video-duration-seconds: ${MAX_VIDEO_DURATION_SECONDS:1200}
     max-requests-per-hour: ${MAX_REQUESTS_PER_HOUR:3}
     max-audio-minutes-per-hour: ${MAX_AUDIO_MINUTES_PER_HOUR:60}
+    max-concurrent-transcriptions: ${MAX_CONCURRENT_TRANSCRIPTIONS:2}
   ytdlp:
     binary-path: ${YTDLP_BINARY_PATH:yt-dlp}
     timeout-seconds: ${YTDLP_TIMEOUT_SECONDS:45}

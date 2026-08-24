@@ -6,26 +6,31 @@ import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionProvider;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
+import io.github.rubenix.yttranscriber.exception.RateLimitedException;
 import io.github.rubenix.yttranscriber.exception.VideoTooLongException;
+import io.github.rubenix.yttranscriber.limiter.CapacityGuard;
+import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class TranscriptionServiceTest {
 
-    private static final ProcessingLimitsProperties LIMITS = new ProcessingLimitsProperties(1200, 3, 60);
+    private static final ProcessingLimitsProperties LIMITS = new ProcessingLimitsProperties(1200, 3, 60, 2);
 
     @Mock
     private SourceResolutionService sourceResolutionService;
@@ -40,8 +45,13 @@ class TranscriptionServiceTest {
 
     @BeforeEach
     void setUp() {
-        transcriptionService = new TranscriptionService(
-                sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService, LIMITS);
+        transcriptionService = newService(LIMITS);
+    }
+
+    private TranscriptionService newService(ProcessingLimitsProperties limits) {
+        return new TranscriptionService(
+                sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService,
+                limits, new UsageLimiter(limits, Clock.systemUTC()), new CapacityGuard(limits));
     }
 
     @Test
@@ -50,7 +60,7 @@ class TranscriptionServiceTest {
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
                 .thenReturn(new SourceResolution(video, "en", List.of()));
 
-        assertThatThrownBy(() -> transcriptionService.process("https://youtu.be/abc123", "es"))
+        assertThatThrownBy(() -> transcriptionService.process("https://youtu.be/abc123", "es", "session-1"))
                 .isInstanceOf(VideoTooLongException.class);
     }
 
@@ -66,7 +76,7 @@ class TranscriptionServiceTest {
         List<TranslatedSegment> translated = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
         when(translationService.translate(transcribed, "en", "es")).thenReturn(translated);
 
-        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es");
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
 
         assertThat(result.video()).isEqualTo(video);
         assertThat(result.segments()).isEqualTo(translated);
@@ -80,8 +90,52 @@ class TranscriptionServiceTest {
                 .thenReturn(new SourceResolution(video, "en", captionSegments));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
-        transcriptionService.process("https://youtu.be/abc123", "es");
+        transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
 
         verify(transcriptionProvider, never()).transcribe(any());
+    }
+
+    @Test
+    void rejectsOnceTheSessionsRequestBudgetIsExhausted() {
+        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 1, 60, 2);
+        TranscriptionService service = newService(tightLimits);
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", captionSegments));
+        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+
+        service.process("https://youtu.be/abc123", "es", "session-1");
+
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1"))
+                .isInstanceOf(RateLimitedException.class);
+        verify(sourceResolutionService, times(1)).resolve("https://youtu.be/abc123");
+    }
+
+    @Test
+    void doesNotCountAgainstAnotherSessionsRequestBudget() {
+        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 1, 60, 2);
+        TranscriptionService service = newService(tightLimits);
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", captionSegments));
+        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+
+        service.process("https://youtu.be/abc123", "es", "session-1");
+
+        assertThat(service.process("https://youtu.be/abc123", "es", "session-2")).isNotNull();
+    }
+
+    @Test
+    void rejectsOnceTheSessionsAudioMinutesBudgetIsExhausted() {
+        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 100, 4, 2);
+        TranscriptionService service = newService(tightLimits);
+        VideoMetadata video = new VideoMetadata("abc123", "A five minute video", 300);
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"))));
+
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1"))
+                .isInstanceOf(RateLimitedException.class);
     }
 }
