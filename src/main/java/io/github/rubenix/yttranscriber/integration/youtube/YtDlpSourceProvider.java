@@ -21,9 +21,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -32,7 +34,11 @@ public class YtDlpSourceProvider implements SourceProvider {
 
     private static final Logger log = LoggerFactory.getLogger(YtDlpSourceProvider.class);
     private static final Set<String> SUPPORTED_AVAILABILITY = Set.of("public", "unlisted");
-    private static final String SOURCE_LANGUAGE = "en";
+    private static final String AUTO_ORIGINAL_SUFFIX = "-orig";
+    // Heuristic, not a full BCP-47 parser: matches "es", "pt-BR", "zh-Hans", "es-419" (region can
+    // be a UN M49 numeric code). Rejects legacy community-contribution keys like
+    // "es-ES-7eCR4kqQbL4", which are a real track id appended to the language, not a real tag.
+    private static final Pattern CLEAN_LANGUAGE_CODE = Pattern.compile("^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$");
 
     private final YtDlpProcessRunner processRunner;
     private final ObjectMapper objectMapper;
@@ -46,16 +52,24 @@ public class YtDlpSourceProvider implements SourceProvider {
 
     @Override
     public SourceResolution resolve(SourceRequest request) {
-        VideoMetadata video = fetchMetadata(request.youtubeUrl());
-        List<TranscriptSegment> segments = fetchSegments(request.youtubeUrl(), video.id());
-        return new SourceResolution(video, SOURCE_LANGUAGE, segments);
+        RawVideoInfo info = fetchRawInfo(request.youtubeUrl());
+        VideoMetadata video = toVideoMetadata(info);
+        CaptionTrack track = selectCaptionTrack(info)
+                .orElseThrow(() -> new UnsupportedSourceException(
+                        "No captions are available for this video in any language."));
+        List<TranscriptSegment> segments = fetchSegments(request.youtubeUrl(), video.id(), track);
+        return new SourceResolution(video, track.language(), segments);
     }
 
     VideoMetadata fetchMetadata(String youtubeUrl) {
+        return toVideoMetadata(fetchRawInfo(youtubeUrl));
+    }
+
+    private RawVideoInfo fetchRawInfo(String youtubeUrl) {
         List<String> command = List.of(
                 properties.binaryPath(),
                 "--skip-download",
-                "--print", "%(.{id,title,duration,availability,is_live})j",
+                "--print", "%(.{id,title,duration,availability,is_live,language,subtitles,automatic_captions})j",
                 youtubeUrl);
 
         var result = processRunner.run(command, Duration.ofSeconds(properties.timeoutSeconds()));
@@ -64,8 +78,10 @@ public class YtDlpSourceProvider implements SourceProvider {
             throw new UnsupportedSourceException("The video could not be resolved: " + youtubeUrl);
         }
 
-        RawVideoInfo info = parse(result.stdout());
+        return parse(result.stdout());
+    }
 
+    private VideoMetadata toVideoMetadata(RawVideoInfo info) {
         if (info.isLive()) {
             throw new UnsupportedSourceException("Live streams are not supported.");
         }
@@ -75,8 +91,50 @@ public class YtDlpSourceProvider implements SourceProvider {
         if (info.duration() == null) {
             throw new UnsupportedSourceException("Could not determine the video duration.");
         }
-
         return new VideoMetadata(info.id(), info.title(), info.duration());
+    }
+
+    /**
+     * Picks the caption track to use as the transcript source, in order of trust: a manual
+     * (uploader-provided) track over an automatic one, and within automatic captions, the
+     * original ASR-detected language (the {@code <lang>-orig} key) over any other language key --
+     * every other key in {@code automatic_captions} is YouTube's own machine translation of the
+     * original track, and feeding one of those into DeepL would translate a translation instead
+     * of the source, compounding errors. Confirmed this schema empirically against real videos
+     * (an English one exposing "en-orig", a Spanish one exposing manual subs under a plain "es").
+     */
+    Optional<CaptionTrack> selectCaptionTrack(RawVideoInfo info) {
+        Optional<String> manual = pickLanguage(keysOf(info.subtitles()), info.language());
+        if (manual.isPresent()) {
+            return Optional.of(new CaptionTrack(manual.get(), true));
+        }
+
+        Set<String> autoKeys = keysOf(info.automaticCaptions());
+        Optional<String> original = autoKeys.stream()
+                .filter(key -> key.endsWith(AUTO_ORIGINAL_SUFFIX))
+                .map(key -> key.substring(0, key.length() - AUTO_ORIGINAL_SUFFIX.length()))
+                .findFirst();
+        if (original.isPresent()) {
+            return Optional.of(new CaptionTrack(original.get(), false));
+        }
+
+        if (info.language() != null && autoKeys.contains(info.language())) {
+            return Optional.of(new CaptionTrack(info.language(), false));
+        }
+
+        return Optional.empty();
+    }
+
+    private Set<String> keysOf(Map<String, Object> tracks) {
+        return tracks != null ? tracks.keySet() : Set.of();
+    }
+
+    private Optional<String> pickLanguage(Set<String> keys, String declaredLanguage) {
+        List<String> clean = keys.stream().filter(key -> CLEAN_LANGUAGE_CODE.matcher(key).matches()).sorted().toList();
+        if (declaredLanguage != null && clean.contains(declaredLanguage)) {
+            return Optional.of(declaredLanguage);
+        }
+        return clean.stream().findFirst();
     }
 
     private RawVideoInfo parse(String stdout) {
@@ -88,49 +146,51 @@ public class YtDlpSourceProvider implements SourceProvider {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record RawVideoInfo(
+    record RawVideoInfo(
             String id,
             String title,
             Long duration,
             String availability,
-            @JsonProperty("is_live") boolean isLive) {
+            @JsonProperty("is_live") boolean isLive,
+            String language,
+            Map<String, Object> subtitles,
+            @JsonProperty("automatic_captions") Map<String, Object> automaticCaptions) {
     }
 
-    List<TranscriptSegment> fetchSegments(String youtubeUrl, String videoId) {
+    record CaptionTrack(String language, boolean manual) {
+    }
+
+    List<TranscriptSegment> fetchSegments(String youtubeUrl, String videoId, CaptionTrack track) {
         Path tempDir = createTempDirectory();
         try {
-            SubtitleAttempt manual = downloadSubtitleFile(youtubeUrl, videoId, tempDir, "--write-subs");
-            if (manual.file().isPresent()) {
-                return parseSegments(manual.file().get());
+            SubtitleAttempt attempt = downloadSubtitleFile(youtubeUrl, videoId, tempDir, track);
+            if (attempt.file().isPresent()) {
+                return parseSegments(attempt.file().get());
             }
 
-            SubtitleAttempt auto = downloadSubtitleFile(youtubeUrl, videoId, tempDir, "--write-auto-subs");
-            if (auto.file().isPresent()) {
-                return parseSegments(auto.file().get());
-            }
-
-            if (manual.failed() || auto.failed()) {
+            if (attempt.failed()) {
                 // A non-zero exit means yt-dlp itself hit a problem (e.g. YouTube rate-limiting
-                // it with a 429) fetching a track we otherwise know might exist — that's not the
-                // same as yt-dlp cleanly reporting "no such captions" (exit 0, no file).
-                log.warn("yt-dlp failed to fetch subtitles for {}. manual: exit={}, stderr={} | auto: exit={}, stderr={}",
-                        videoId, manual.exitCode(), manual.stderr(), auto.exitCode(), auto.stderr());
+                // it with a 429) fetching a track the metadata call told us should exist -- that's
+                // not the same as yt-dlp cleanly reporting "no such captions" (exit 0, no file).
+                log.warn("yt-dlp failed to fetch {} subtitles ({}) for {}: exit={}, stderr={}",
+                        track.manual() ? "manual" : "auto-generated", track.language(), videoId,
+                        attempt.exitCode(), attempt.stderr());
                 throw new ProviderUnavailableException("Could not fetch captions from the source provider.");
             }
 
             throw new UnsupportedSourceException(
-                    "No %s captions are available for this video.".formatted(SOURCE_LANGUAGE));
+                    "No %s captions are available for this video.".formatted(track.language()));
         } finally {
             deleteRecursively(tempDir);
         }
     }
 
-    private SubtitleAttempt downloadSubtitleFile(String youtubeUrl, String videoId, Path tempDir, String subsFlag) {
+    private SubtitleAttempt downloadSubtitleFile(String youtubeUrl, String videoId, Path tempDir, CaptionTrack track) {
         List<String> command = List.of(
                 properties.binaryPath(),
                 "--skip-download",
-                subsFlag,
-                "--sub-langs", SOURCE_LANGUAGE,
+                track.manual() ? "--write-subs" : "--write-auto-subs",
+                "--sub-langs", track.language(),
                 "--sub-format", "json3",
                 "-P", tempDir.toString(),
                 "-o", "%(id)s",
@@ -138,9 +198,24 @@ public class YtDlpSourceProvider implements SourceProvider {
 
         var result = processRunner.run(command, Duration.ofSeconds(properties.timeoutSeconds()));
 
-        Path candidate = tempDir.resolve(videoId + "." + SOURCE_LANGUAGE + ".json3");
-        Optional<Path> file = Files.exists(candidate) ? Optional.of(candidate) : Optional.empty();
+        Optional<Path> file = findSubtitleFile(tempDir, videoId);
         return new SubtitleAttempt(file, result.exitCode() != 0, result.exitCode(), result.stderr());
+    }
+
+    private Optional<Path> findSubtitleFile(Path tempDir, String videoId) {
+        // Scans instead of reconstructing the exact filename: yt-dlp names the file
+        // "{id}.{lang}.json3", and scanning tolerates language-tag formatting we didn't
+        // anticipate rather than silently missing a file that's really there.
+        try (Stream<Path> paths = Files.list(tempDir)) {
+            return paths
+                    .filter(path -> {
+                        String name = path.getFileName().toString();
+                        return name.startsWith(videoId + ".") && name.endsWith(".json3");
+                    })
+                    .findFirst();
+        } catch (IOException e) {
+            return Optional.empty();
+        }
     }
 
     private record SubtitleAttempt(Optional<Path> file, boolean failed, int exitCode, String stderr) {
