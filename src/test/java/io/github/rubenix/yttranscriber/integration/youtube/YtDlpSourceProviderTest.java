@@ -1,6 +1,5 @@
 package io.github.rubenix.yttranscriber.integration.youtube;
 
-import tools.jackson.databind.ObjectMapper;
 import io.github.rubenix.yttranscriber.domain.source.SourceRequest;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
@@ -16,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
