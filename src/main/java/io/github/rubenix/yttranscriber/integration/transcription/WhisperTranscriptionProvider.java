@@ -1,7 +1,6 @@
 package io.github.rubenix.yttranscriber.integration.transcription;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import tools.jackson.databind.ObjectMapper;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionProvider;
@@ -9,19 +8,18 @@ import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionRequest
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.UnsupportedSourceException;
 import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner;
+import io.github.rubenix.yttranscriber.integration.process.TempWorkspace;
 import io.github.rubenix.yttranscriber.integration.youtube.YtDlpProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Stream;
 
 /**
  * TranscriptionProvider backed by a local whisper.cpp install: extracts the video's audio with
@@ -63,17 +61,15 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
                             .formatted(whisperProperties.minAudioDurationSeconds()));
         }
 
-        Path tempDir = createTempDirectory();
-        try {
-            Path audioFile = extractAudio(request.youtubeUrl(), request.video().id(), tempDir);
-            WhisperOutput output = runWhisper(audioFile, tempDir, request.sourceLanguage());
+        try (TempWorkspace workspace = TempWorkspace.create(
+                "whisper-stt-", "Could not create a temporary directory for transcription.")) {
+            Path audioFile = extractAudio(request.youtubeUrl(), request.video().id(), workspace.directory());
+            WhisperOutput output = runWhisper(audioFile, workspace.directory(), request.sourceLanguage());
             List<TranscriptSegment> segments = toSegments(output);
             if (segments.isEmpty()) {
                 throw new UnsupportedSourceException("Could not detect any speech in this video's audio.");
             }
             return new TranscriptionOutcome(output.language(), segments);
-        } finally {
-            deleteRecursively(tempDir);
         }
     }
 
@@ -137,30 +133,6 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
             segments.add(new TranscriptSegment(sequence++, startMs, endMs, text));
         }
         return segments;
-    }
-
-    private Path createTempDirectory() {
-        try {
-            return Files.createTempDirectory("whisper-stt-");
-        } catch (IOException e) {
-            throw new ProviderUnavailableException("Could not create a temporary directory for transcription.");
-        }
-    }
-
-    private void deleteRecursively(Path dir) {
-        try (Stream<Path> paths = Files.walk(dir)) {
-            paths.sorted(Comparator.reverseOrder()).forEach(this::deleteQuietly);
-        } catch (IOException ignored) {
-            // best-effort cleanup; the OS will reclaim the temp dir eventually regardless
-        }
-    }
-
-    private void deleteQuietly(Path path) {
-        try {
-            Files.delete(path);
-        } catch (IOException ignored) {
-            // best-effort cleanup of an ephemeral temp file
-        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
