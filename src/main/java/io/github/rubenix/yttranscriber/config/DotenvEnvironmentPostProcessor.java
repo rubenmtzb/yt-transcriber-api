@@ -29,7 +29,10 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         Path envFile = Path.of(".env").toAbsolutePath();
         if (!Files.isRegularFile(envFile)) {
-            System.out.println("[dotenv] No .env file found at " + envFile + " — relying on real environment variables.");
+            // ASCII only: this goes to System.out, whose encoding follows the console (a POSIX
+            // locale in a container, for one), not the UTF-8 the source file is compiled with --
+            // a non-ASCII dash would surface as a "?" exactly where startup output must be clear.
+            System.out.println("[dotenv] No .env file found at " + envFile + " -- relying on real environment variables.");
             return;
         }
 
