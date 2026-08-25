@@ -11,10 +11,11 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
 
 /**
  * Tracks per-session usage against the hourly request and audio-minute budgets configured in
- * {@link ProcessingLimitsProperties}. Sessions are anonymous cookie identities (see
+ * {@link ProcessingLimitsProperties}. Sessions are anonymous header-carried identities (see
  * {@link SessionIdFilter}), not IP addresses — a deliberate V1 scope decision, since this
  * runs as a single local instance without a reverse proxy in front of it yet.
  *
@@ -42,7 +43,7 @@ public class UsageLimiter {
         usage.lock.lock();
         try {
             Instant now = clock.instant();
-            evict(usage.requestTimestamps, java.util.function.Function.identity(), now);
+            evict(usage.requestTimestamps, Function.identity(), now);
             if (usage.requestTimestamps.size() >= limits.maxRequestsPerHour()) {
                 throw new RateLimitedException(
                         "You've reached the limit of %d requests per hour.".formatted(limits.maxRequestsPerHour()));
@@ -71,7 +72,7 @@ public class UsageLimiter {
         }
     }
 
-    private <T> void evict(Deque<T> entries, java.util.function.Function<T, Instant> timestampOf, Instant now) {
+    private <T> void evict(Deque<T> entries, Function<T, Instant> timestampOf, Instant now) {
         while (!entries.isEmpty() && Duration.between(timestampOf.apply(entries.peekFirst()), now).compareTo(WINDOW) >= 0) {
             entries.pollFirst();
         }
