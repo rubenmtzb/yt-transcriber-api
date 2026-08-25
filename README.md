@@ -67,6 +67,8 @@ It is a `GET` with query parameters rather than a `POST` with a body because the
 | `result`  | The same JSON body as the POST endpoint                                                       |
 | `error`   | The error envelope below                                                                     |
 
+If the client closes the stream, the run is abandoned at the next stage boundary instead of being carried to completion — it would otherwise hold one of very few processing slots busy building a result nobody will read. An in-flight subprocess still finishes the stage it is on, since there is no cheap way to kill one mid-call.
+
 ### Errors
 
 Every failure returns the same envelope, on both endpoints:
@@ -80,7 +82,7 @@ Every failure returns the same envelope, on both endpoints:
 | `INVALID_REQUEST`            | 400  | no        | Malformed URL or target language                    |
 | `UNSUPPORTED_SOURCE`         | 422  | no        | Private video, live stream, or too short to transcribe |
 | `VIDEO_TOO_LONG`             | 413  | no        | Over `MAX_VIDEO_DURATION_SECONDS`                   |
-| `RATE_LIMITED`               | 429  | yes       | Session budget spent, or the server is at capacity  |
+| `RATE_LIMITED`               | 429  | yes       | Session budget spent, or the server is at capacity. Being turned away for capacity does not spend any of the caller's budget |
 | `PROVIDER_UNAVAILABLE`       | 503  | yes       | An upstream provider or local binary failed         |
 | `TRANSLATION_QUOTA_EXCEEDED` | 503  | no        | DeepL's monthly character quota is used up          |
 | `INTERNAL_ERROR`             | 500  | no        | Unhandled failure                                   |
@@ -176,7 +178,7 @@ For Speech-to-Text, install whisper.cpp with `brew install whisper-cpp`, downloa
 
 ```text
 src/main/java/io/github/rubenix/yttranscriber/
-  api/                  TranscriptionController + DTOs
+  api/                  TranscriptionController, SSE stream channel + DTOs
   application/          Use-case services, SentenceGrouper, progress reporting
   domain/
     source/             VideoMetadata, SourceProvider port
