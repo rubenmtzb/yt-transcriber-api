@@ -49,7 +49,8 @@ class YtDlpSourceProviderTest {
                 {"id": "dQw4w9WgXcQ", "title": "Never Gonna Give You Up", "duration": 213, "availability": "public", "is_live": false}
                 """, 0);
 
-        VideoMetadata metadata = sourceProvider.fetchMetadata("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        VideoMetadata metadata = sourceProvider.resolve(
+                new SourceRequest("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).video();
 
         assertThat(metadata.id()).isEqualTo("dQw4w9WgXcQ");
         assertThat(metadata.title()).isEqualTo("Never Gonna Give You Up");
@@ -62,7 +63,7 @@ class YtDlpSourceProviderTest {
                 {"id": "abc", "title": "Live now", "duration": null, "availability": "public", "is_live": true}
                 """, 0);
 
-        assertThatThrownBy(() -> sourceProvider.fetchMetadata("https://www.youtube.com/watch?v=abc"))
+        assertThatThrownBy(() -> sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=abc")))
                 .isInstanceOf(UnsupportedSourceException.class);
     }
 
@@ -72,7 +73,7 @@ class YtDlpSourceProviderTest {
                 {"id": "abc", "title": "Private", "duration": 100, "availability": "needs_auth", "is_live": false}
                 """, 0);
 
-        assertThatThrownBy(() -> sourceProvider.fetchMetadata("https://www.youtube.com/watch?v=abc"))
+        assertThatThrownBy(() -> sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=abc")))
                 .isInstanceOf(UnsupportedSourceException.class);
     }
 
@@ -82,7 +83,7 @@ class YtDlpSourceProviderTest {
                 {"id": "abc", "title": "Odd video", "duration": 100, "availability": null, "is_live": false}
                 """, 0);
 
-        assertThatThrownBy(() -> sourceProvider.fetchMetadata("https://www.youtube.com/watch?v=abc"))
+        assertThatThrownBy(() -> sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=abc")))
                 .isInstanceOf(UnsupportedSourceException.class);
     }
 
@@ -90,7 +91,7 @@ class YtDlpSourceProviderTest {
     void treatsANonZeroExitCodeAsAnUnsupportedSource() {
         stub("", 1);
 
-        assertThatThrownBy(() -> sourceProvider.fetchMetadata("https://www.youtube.com/watch?v=missing"))
+        assertThatThrownBy(() -> sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=missing")))
                 .isInstanceOf(UnsupportedSourceException.class);
     }
 
@@ -98,7 +99,7 @@ class YtDlpSourceProviderTest {
     void treatsUnparseableOutputAsProviderUnavailable() {
         stub("not json", 0);
 
-        assertThatThrownBy(() -> sourceProvider.fetchMetadata("https://www.youtube.com/watch?v=abc"))
+        assertThatThrownBy(() -> sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=abc")))
                 .isInstanceOf(ProviderUnavailableException.class);
     }
 

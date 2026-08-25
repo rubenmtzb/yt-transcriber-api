@@ -69,10 +69,6 @@ public class YtDlpSourceProvider implements SourceProvider {
         return new SourceResolution(video, track.get().language(), segments);
     }
 
-    VideoMetadata fetchMetadata(String youtubeUrl) {
-        return toVideoMetadata(fetchRawInfo(youtubeUrl));
-    }
-
     private RawVideoInfo fetchRawInfo(String youtubeUrl) {
         List<String> command = List.of(
                 properties.binaryPath(),
