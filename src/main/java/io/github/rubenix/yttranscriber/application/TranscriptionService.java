@@ -13,6 +13,7 @@ import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Orchestrates the synchronous transcription use case: enforce the caller's request budget,
@@ -78,6 +79,7 @@ public class TranscriptionService {
                 sourceLanguage = resolution.sourceLanguage();
                 segments = resolution.segments();
             }
+            sourceLanguage = normalizeLanguageCode(sourceLanguage);
 
             progress.onStage(ProcessingStage.TRANSLATING);
             List<TranscriptSegment> grouped = sentenceGrouper.group(segments);
@@ -86,6 +88,20 @@ public class TranscriptionService {
             progress.onStage(ProcessingStage.PREPARING_RESULT);
             return new TranscriptionResult(resolution.video(), sourceLanguage, targetLanguage, translated);
         });
+    }
+
+    // YouTube caption tracks can carry a region/script subtag ("pt-BR", "es-419"); Whisper's
+    // detected language is already a bare code. Normalizing to the primary subtag here -- once,
+    // before it's used for the same-language translation check and echoed back in the response --
+    // keeps it directly comparable to targetLanguage, which the request DTO restricts to a plain
+    // two-letter code.
+    private String normalizeLanguageCode(String languageCode) {
+        if (languageCode == null || languageCode.isBlank()) {
+            return languageCode;
+        }
+        int separator = languageCode.indexOf('-');
+        String primary = separator > 0 ? languageCode.substring(0, separator) : languageCode;
+        return primary.toLowerCase(Locale.ROOT);
     }
 
     private void requireWithinDurationLimit(long durationSeconds) {

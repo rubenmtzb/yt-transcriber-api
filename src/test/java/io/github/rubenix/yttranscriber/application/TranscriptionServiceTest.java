@@ -103,6 +103,22 @@ class TranscriptionServiceTest {
     }
 
     @Test
+    void normalizesARegionTaggedSourceLanguageToItsPrimarySubtag() {
+        // Caption tracks can carry a region/script subtag ("pt-BR"); the result -- and the
+        // same-language check inside TranslationService -- must see the bare primary subtag so
+        // it's directly comparable to targetLanguage.
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Ola"));
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "pt-BR", captionSegments));
+        when(translationService.translate(captionSegments, "pt", "es")).thenReturn(List.of());
+
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
+
+        assertThat(result.sourceLanguage()).isEqualTo("pt");
+    }
+
+    @Test
     void skipsTranscriptionWhenTheSourceAlreadyProvidesSegments() {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
