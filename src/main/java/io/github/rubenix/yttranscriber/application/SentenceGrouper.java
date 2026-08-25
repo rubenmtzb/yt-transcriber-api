@@ -41,8 +41,7 @@ public class SentenceGrouper {
                     && previousEndMs != null
                     && (segment.startMs() - previousEndMs) >= GAP_BREAK_MS;
             if (gapBreak) {
-                merged.add(new TranscriptSegment(merged.size(), groupStart, groupEnd, buffer.toString()));
-                buffer.setLength(0);
+                flush(merged, buffer, groupStart, groupEnd);
                 wordCount = 0;
                 startingNewGroup = true;
             }
@@ -59,21 +58,27 @@ public class SentenceGrouper {
 
             boolean overCap = wordCount >= MAX_GROUP_WORDS || (groupEnd - groupStart) >= MAX_GROUP_SPAN_MS;
             if (endsWithSentenceTerminator(text) || overCap) {
-                merged.add(new TranscriptSegment(merged.size(), groupStart, groupEnd, buffer.toString()));
-                buffer.setLength(0);
+                flush(merged, buffer, groupStart, groupEnd);
                 wordCount = 0;
             }
         }
 
         if (!buffer.isEmpty()) {
-            merged.add(new TranscriptSegment(merged.size(), groupStart, groupEnd, buffer.toString()));
+            flush(merged, buffer, groupStart, groupEnd);
         }
 
         return merged;
     }
 
+    /** Closes the group accumulated in {@code buffer}, appending it to {@code merged} and resetting it. */
+    private static void flush(List<TranscriptSegment> merged, StringBuilder buffer, long groupStart, long groupEnd) {
+        merged.add(new TranscriptSegment(merged.size(), groupStart, groupEnd, buffer.toString()));
+        buffer.setLength(0);
+    }
+
+    /** Counts words in already-stripped text, so no further trimming is needed here. */
     private static int countWords(String text) {
-        return text.isBlank() ? 0 : text.trim().split("\\s+").length;
+        return text.split("\\s+").length;
     }
 
     private static boolean endsWithSentenceTerminator(String text) {
