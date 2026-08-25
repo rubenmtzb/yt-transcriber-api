@@ -27,6 +27,9 @@ ARG WHISPER_RELEASE=b4938
 # this image, no external API, no per-request cost. whisper.cpp ships prebuilt per-arch Linux
 # binaries (dynamically linked against the .so files bundled alongside it, hence LD_LIBRARY_PATH
 # below) so no compiler toolchain is needed here.
+#
+# The "small" model (not "base"): confirmed empirically that "base" hallucinates badly on sung/
+# stylized vocals -- a captionless music video is a normal case here, not an edge case.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates unzip python3 ffmpeg \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
@@ -37,14 +40,14 @@ RUN apt-get update \
     && mkdir -p /opt/whisper/models \
     && tar -xzf /tmp/whisper.tar.gz -C /opt/whisper --strip-components=1 \
     && rm /tmp/whisper.tar.gz \
-    && curl -fsSL https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin -o /opt/whisper/models/ggml-base.bin \
+    && curl -fsSL https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin -o /opt/whisper/models/ggml-small.bin \
     && chmod -R a+rX /opt/whisper \
     && apt-get purge -y curl unzip \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV WHISPER_BINARY_PATH=/opt/whisper/whisper-cli
-ENV WHISPER_MODEL_PATH=/opt/whisper/models/ggml-base.bin
+ENV WHISPER_MODEL_PATH=/opt/whisper/models/ggml-small.bin
 ENV LD_LIBRARY_PATH=/opt/whisper
 
 RUN useradd --system --create-home --shell /usr/sbin/nologin appuser
