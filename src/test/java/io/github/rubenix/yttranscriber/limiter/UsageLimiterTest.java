@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -76,6 +77,41 @@ class UsageLimiterTest {
         clock.advance(Duration.ofHours(1).plusSeconds(1));
 
         assertThatCode(() -> limiter.checkAndRecordAudioMinutes("session-a", 300)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void dropsSessionsWhoseWindowsHaveFullyExpired() {
+        // Anonymous ids are minted per browser and mostly never come back, so without this sweep
+        // the map gains an entry per distinct caller and never releases one.
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2), clock);
+
+        limiter.checkAndRecordRequest("session-a");
+        limiter.checkAndRecordAudioMinutes("session-b", 120);
+        assertThat(limiter.trackedSessionCount()).isEqualTo(2);
+
+        // past the usage window, so both are spent, and past the sweep interval, so a pass is due
+        clock.advance(Duration.ofHours(1).plusMinutes(6));
+        limiter.checkAndRecordRequest("session-c");
+
+        assertThat(limiter.trackedSessionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void keepsSessionsStillInsideTheirWindowWhenSweeping() {
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2), clock);
+
+        limiter.checkAndRecordRequest("session-a");
+
+        // past the sweep interval but well inside the one-hour window: session-a is still live
+        clock.advance(Duration.ofMinutes(6));
+        limiter.checkAndRecordRequest("session-b");
+
+        assertThat(limiter.trackedSessionCount()).isEqualTo(2);
+        assertThatThrownBy(() -> {
+            for (int i = 0; i < 5; i++) {
+                limiter.checkAndRecordRequest("session-a");
+            }
+        }).isInstanceOf(RateLimitedException.class);
     }
 
     private static final class MutableClock extends Clock {
