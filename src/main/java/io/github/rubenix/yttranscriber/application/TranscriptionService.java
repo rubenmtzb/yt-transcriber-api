@@ -15,8 +15,8 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Orchestrates the synchronous transcription use case: enforce the caller's request budget,
- * reserve a slot in the global capacity guard, resolve source, enforce the video duration
+ * Orchestrates the synchronous transcription use case: reserve a slot in the global capacity
+ * guard, enforce the caller's request budget, resolve source, enforce the video duration
  * guardrail and the caller's audio-minutes budget, transcribe if the source has no ready-made
  * captions, then translate.
  */
@@ -58,9 +58,13 @@ public class TranscriptionService {
      * the moment the stream opens.
      */
     public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId, ProgressListener progress) {
-        usageLimiter.checkAndRecordRequest(sessionId);
-
         return capacityGuard.runWithinCapacity(() -> {
+            // Charged only once a capacity permit is actually held. Charging before would spend one
+            // of the caller's hourly requests on a "server busy" rejection that did no work at all
+            // -- and since RATE_LIMITED is flagged retryable, the UI invites exactly the retries
+            // that would burn the rest of the budget on the server's own congestion.
+            usageLimiter.checkAndRecordRequest(sessionId);
+
             progress.onStage(ProcessingStage.RESOLVING_VIDEO);
             SourceResolution resolution = sourceResolutionService.resolve(youtubeUrl);
             requireWithinDurationLimit(resolution.video().durationSeconds());
