@@ -85,7 +85,7 @@ public class TranscriptionService {
 
             progress.onStage(ProcessingStage.TRANSLATING);
             List<TranscriptSegment> grouped = sentenceGrouper.group(segments);
-            List<TranslatedSegment> translated = translationService.translate(grouped, sourceLanguage, targetLanguage);
+            List<TranslatedSegment> translated = translationService.translate(grouped, targetLanguage);
 
             progress.onStage(ProcessingStage.PREPARING_RESULT);
             return new TranscriptionResult(resolution.video(), sourceLanguage, targetLanguage, translated);

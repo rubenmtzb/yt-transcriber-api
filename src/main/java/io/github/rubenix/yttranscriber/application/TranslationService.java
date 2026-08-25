@@ -17,7 +17,7 @@ public class TranslationService {
         this.translationProvider = translationProvider;
     }
 
-    public List<TranslatedSegment> translate(List<TranscriptSegment> segments, String sourceLanguage, String targetLanguage) {
-        return translationProvider.translate(new TranslationRequest(segments, sourceLanguage, targetLanguage));
+    public List<TranslatedSegment> translate(List<TranscriptSegment> segments, String targetLanguage) {
+        return translationProvider.translate(new TranslationRequest(segments, targetLanguage));
     }
 }

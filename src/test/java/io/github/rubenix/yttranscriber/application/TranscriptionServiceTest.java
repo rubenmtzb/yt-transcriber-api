@@ -78,7 +78,7 @@ class TranscriptionServiceTest {
         when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("en", transcribed));
 
         List<TranslatedSegment> translated = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
-        when(translationService.translate(transcribed, "en", "es")).thenReturn(translated);
+        when(translationService.translate(transcribed, "es")).thenReturn(translated);
 
         TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
 
@@ -97,7 +97,7 @@ class TranscriptionServiceTest {
 
         List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hola a todos"));
         when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("es", transcribed));
-        when(translationService.translate(transcribed, "es", "en")).thenReturn(List.of());
+        when(translationService.translate(transcribed, "en")).thenReturn(List.of());
 
         TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "en", "session-1");
 
@@ -110,7 +110,7 @@ class TranscriptionServiceTest {
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
                 .thenReturn(new SourceResolution(video, "en", captionSegments));
-        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+        when(translationService.translate(captionSegments, "es")).thenReturn(List.of());
 
         transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
 
@@ -125,7 +125,7 @@ class TranscriptionServiceTest {
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
                 .thenReturn(new SourceResolution(video, "en", captionSegments));
-        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+        when(translationService.translate(captionSegments, "es")).thenReturn(List.of());
 
         service.process("https://youtu.be/abc123", "es", "session-1");
 
@@ -142,7 +142,7 @@ class TranscriptionServiceTest {
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
                 .thenReturn(new SourceResolution(video, "en", captionSegments));
-        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+        when(translationService.translate(captionSegments, "es")).thenReturn(List.of());
 
         service.process("https://youtu.be/abc123", "es", "session-1");
 
@@ -155,7 +155,7 @@ class TranscriptionServiceTest {
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
                 .thenReturn(new SourceResolution(video, "en", captionSegments));
-        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+        when(translationService.translate(captionSegments, "es")).thenReturn(List.of());
 
         List<ProcessingStage> reported = new ArrayList<>();
         transcriptionService.process("https://youtu.be/abc123", "es", "session-1", reported::add);
@@ -171,7 +171,7 @@ class TranscriptionServiceTest {
                 .thenReturn(new SourceResolution(video, null, List.of()));
         List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("en", transcribed));
-        when(translationService.translate(transcribed, "en", "es")).thenReturn(List.of());
+        when(translationService.translate(transcribed, "es")).thenReturn(List.of());
 
         List<ProcessingStage> reported = new ArrayList<>();
         transcriptionService.process("https://youtu.be/abc123", "es", "session-1", reported::add);
