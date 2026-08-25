@@ -15,13 +15,20 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    // Both validation handlers answer with the same deliberately generic message: echoing which
+    // constraint failed would leak the exact accepted URL shapes back to a caller probing the
+    // endpoint. The specifics go to the log at debug instead, where they are still there to
+    // diagnose a frontend sending a malformed request.
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
+        log.debug("Request body validation failed: {}", ex.getMessage());
         return respond(ErrorCode.INVALID_REQUEST, "The request payload is invalid.");
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex) {
+        log.debug("Request parameter validation failed: {}", ex.getMessage());
         return respond(ErrorCode.INVALID_REQUEST, "The request payload is invalid.");
     }
 
