@@ -29,8 +29,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
-
 @RestController
 @RequestMapping("/api/v1/transcriptions")
 @Validated
@@ -60,6 +58,9 @@ public class TranscriptionController {
      * finally either a "result" or an "error" event. GET only: EventSource cannot issue POSTs, so
      * the request body becomes query parameters, validated against the exact same rules as the
      * POST endpoint's body (see the shared pattern constants on the DTO).
+     *
+     * <p>If the client goes away mid-stream the run is abandoned at the next stage boundary rather
+     * than carried to completion -- see {@link TranscriptionStreamChannel}.
      */
     @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(
@@ -67,54 +68,34 @@ public class TranscriptionController {
             @RequestParam @NotBlank @Pattern(regexp = TranscriptionRequestDto.TARGET_LANGUAGE_PATTERN) String targetLanguage,
             @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId) {
         SseEmitter emitter = new SseEmitter(0L);
+        TranscriptionStreamChannel channel = new TranscriptionStreamChannel(emitter);
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
 
-        Thread.ofVirtual().start(() -> runStream(emitter, youtubeUrl, targetLanguage, sessionId, requestId));
+        Thread.ofVirtual().start(() -> runStream(channel, youtubeUrl, targetLanguage, sessionId, requestId));
 
         return emitter;
     }
 
-    private void runStream(SseEmitter emitter, String youtubeUrl, String targetLanguage, String sessionId, String requestId) {
+    private void runStream(TranscriptionStreamChannel channel, String youtubeUrl, String targetLanguage,
+                            String sessionId, String requestId) {
         try {
-            emitter.send(SseEmitter.event().name("session").data(sessionId));
-            emitter.send(SseEmitter.event().name("stage").data(ProcessingStage.VALIDATING_URL.name()));
+            channel.sendSession(sessionId);
+            channel.sendStage(ProcessingStage.VALIDATING_URL);
 
             TranscriptionResult result = transcriptionService.process(
-                    youtubeUrl, targetLanguage, sessionId, stage -> sendStage(emitter, stage));
+                    youtubeUrl, targetLanguage, sessionId, channel::sendStage);
 
-            emitter.send(SseEmitter.event().name("result").data(TranscriptionResponseDto.from(result)));
-            emitter.complete();
+            channel.sendResult(TranscriptionResponseDto.from(result));
+        } catch (TranscriptionStreamChannel.StreamAborted e) {
+            log.info("Client disconnected; abandoning the in-flight transcription for session {}", sessionId);
         } catch (ApplicationException e) {
             log.warn("Business rule violation during streaming: code={}, message={}", e.errorCode(), e.getMessage());
-            sendError(emitter, ErrorResponse.of(e.errorCode(), e.getMessage(), requestId));
-            emitter.complete();
+            channel.sendError(ErrorResponse.of(e.errorCode(), e.getMessage(), requestId));
         } catch (Exception e) {
             log.error("Unhandled exception during streaming", e);
-            sendError(emitter, ErrorResponse.of(ErrorCode.INTERNAL_ERROR, "An unexpected error occurred.", requestId));
-            emitter.complete();
-        }
-    }
-
-    private void sendStage(SseEmitter emitter, ProcessingStage stage) {
-        try {
-            // .data(String) is written to the wire as-is; .data(Object) instead runs it through
-            // the JSON message converter, which would wrap a bare enum in quotes ("RESOLVING_VIDEO"
-            // instead of RESOLVING_VIDEO) -- confirmed with a raw curl trace of the stream, since
-            // the frontend comparing that raw event data against ProcessingStage string literals
-            // would then silently never match past the very first (hardcoded, pre-stream) stage.
-            emitter.send(SseEmitter.event().name("stage").data(stage.name()));
-        } catch (IOException e) {
-            // client disconnected; the in-flight call still runs to completion (no cheap way to
-            // cancel a blocking subprocess-backed call mid-flight) but its result now has nowhere
-            // to go, so subsequent sends on this emitter will just keep hitting this same branch
-        }
-    }
-
-    private void sendError(SseEmitter emitter, ErrorResponse error) {
-        try {
-            emitter.send(SseEmitter.event().name("error").data(error));
-        } catch (IOException ignored) {
-            // client already gone
+            channel.sendError(ErrorResponse.of(ErrorCode.INTERNAL_ERROR, "An unexpected error occurred.", requestId));
+        } finally {
+            channel.complete();
         }
     }
 }

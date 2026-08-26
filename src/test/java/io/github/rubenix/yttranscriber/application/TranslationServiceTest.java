@@ -54,7 +54,7 @@ class TranslationServiceTest {
     void callsTheProviderWhenSourceAndTargetLanguagesDiffer() {
         List<TranscriptSegment> segments = List.of(new TranscriptSegment(0, 0, 4200, "Hello"));
         List<TranslatedSegment> translated = List.of(new TranslatedSegment(0, 0, 4200, "Hello", "Hola"));
-        when(translationProvider.translate(new TranslationRequest(segments, "en", "es"))).thenReturn(translated);
+        when(translationProvider.translate(new TranslationRequest(segments, "es"))).thenReturn(translated);
 
         List<TranslatedSegment> result = translationService.translate(segments, "en", "es");
 

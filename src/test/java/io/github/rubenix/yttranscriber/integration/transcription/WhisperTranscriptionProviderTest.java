@@ -1,6 +1,5 @@
 package io.github.rubenix.yttranscriber.integration.transcription;
 
-import tools.jackson.databind.ObjectMapper;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome;
@@ -15,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,6 +23,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -167,7 +168,7 @@ class WhisperTranscriptionProviderTest {
     }
 
     private List<String> argThatContains(String flag, String value) {
-        return org.mockito.ArgumentMatchers.argThat(command -> {
+        return argThat(command -> {
             int index = command.indexOf(flag);
             return index >= 0 && index + 1 < command.size() && command.get(index + 1).equals(value);
         });

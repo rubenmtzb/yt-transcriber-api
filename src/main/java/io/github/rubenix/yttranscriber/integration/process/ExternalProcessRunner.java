@@ -34,7 +34,7 @@ public class ExternalProcessRunner {
         if (!waitFor(process, timeout, command)) {
             process.destroyForcibly();
             throw new ProviderUnavailableException(
-                    "Process timed out after %s: %s".formatted(timeout, command.get(0)));
+                    "Process timed out after %s: %s".formatted(timeout, command.getFirst()));
         }
 
         joinQuietly(stdoutThread);
@@ -47,7 +47,7 @@ public class ExternalProcessRunner {
         try {
             return new ProcessBuilder(command).start();
         } catch (IOException e) {
-            throw new ProviderUnavailableException("Could not start process: " + command.get(0));
+            throw new ProviderUnavailableException("Could not start process: " + command.getFirst());
         }
     }
 
@@ -57,7 +57,7 @@ public class ExternalProcessRunner {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
-            throw new ProviderUnavailableException("Interrupted while waiting for process: " + command.get(0));
+            throw new ProviderUnavailableException("Interrupted while waiting for process: " + command.getFirst());
         }
     }
 

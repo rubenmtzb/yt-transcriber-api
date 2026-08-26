@@ -2,7 +2,6 @@ package io.github.rubenix.yttranscriber.integration.youtube;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import tools.jackson.databind.ObjectMapper;
 import io.github.rubenix.yttranscriber.domain.source.SourceProvider;
 import io.github.rubenix.yttranscriber.domain.source.SourceRequest;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
@@ -11,16 +10,17 @@ import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.UnsupportedSourceException;
 import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner;
+import io.github.rubenix.yttranscriber.integration.process.TempWorkspace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -67,10 +67,6 @@ public class YtDlpSourceProvider implements SourceProvider {
 
         List<TranscriptSegment> segments = fetchSegments(request.youtubeUrl(), video.id(), track.get());
         return new SourceResolution(video, track.get().language(), segments);
-    }
-
-    VideoMetadata fetchMetadata(String youtubeUrl) {
-        return toVideoMetadata(fetchRawInfo(youtubeUrl));
     }
 
     private RawVideoInfo fetchRawInfo(String youtubeUrl) {
@@ -169,9 +165,9 @@ public class YtDlpSourceProvider implements SourceProvider {
     }
 
     List<TranscriptSegment> fetchSegments(String youtubeUrl, String videoId, CaptionTrack track) {
-        Path tempDir = createTempDirectory();
-        try {
-            SubtitleAttempt attempt = downloadSubtitleFile(youtubeUrl, videoId, tempDir, track);
+        try (TempWorkspace workspace = TempWorkspace.create(
+                "ytdlp-subs-", "Could not create a temporary directory for subtitle download.")) {
+            SubtitleAttempt attempt = downloadSubtitleFile(youtubeUrl, videoId, workspace.directory(), track);
             if (attempt.file().isPresent()) {
                 return parseSegments(attempt.file().get());
             }
@@ -188,8 +184,6 @@ public class YtDlpSourceProvider implements SourceProvider {
 
             throw new UnsupportedSourceException(
                     "No %s captions are available for this video.".formatted(track.language()));
-        } finally {
-            deleteRecursively(tempDir);
         }
     }
 
@@ -257,30 +251,6 @@ public class YtDlpSourceProvider implements SourceProvider {
             segments.add(new TranscriptSegment(sequence++, startMs, startMs + durationMs, text));
         }
         return segments;
-    }
-
-    private Path createTempDirectory() {
-        try {
-            return Files.createTempDirectory("ytdlp-subs-");
-        } catch (IOException e) {
-            throw new ProviderUnavailableException("Could not create a temporary directory for subtitle download.");
-        }
-    }
-
-    private void deleteRecursively(Path dir) {
-        try (Stream<Path> paths = Files.walk(dir)) {
-            paths.sorted(Comparator.reverseOrder()).forEach(this::deleteQuietly);
-        } catch (IOException ignored) {
-            // best-effort cleanup; the OS will reclaim the temp dir eventually regardless
-        }
-    }
-
-    private void deleteQuietly(Path path) {
-        try {
-            Files.delete(path);
-        } catch (IOException ignored) {
-            // best-effort cleanup of an ephemeral temp file
-        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

@@ -20,8 +20,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -193,6 +195,45 @@ class TranscriptionServiceTest {
         assertThat(reported).containsExactly(
                 ProcessingStage.RESOLVING_VIDEO, ProcessingStage.TRANSCRIBING,
                 ProcessingStage.TRANSLATING, ProcessingStage.PREPARING_RESULT);
+    }
+
+    @Test
+    void doesNotSpendTheSessionsRequestBudgetWhenRejectedForCapacity() throws Exception {
+        // Being turned away because the server is busy is the server's problem, not the caller's:
+        // it must not cost one of their few hourly requests, or a couple of retries on a busy
+        // server would lock them out for an hour without ever having transcribed anything.
+        ProcessingLimitsProperties oneAtATime = new ProcessingLimitsProperties(1200, 1, 60, 1);
+        UsageLimiter usageLimiter = new UsageLimiter(oneAtATime, Clock.systemUTC());
+        CapacityGuard capacityGuard = new CapacityGuard(oneAtATime);
+        TranscriptionService service = new TranscriptionService(
+                sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService,
+                oneAtATime, usageLimiter, capacityGuard);
+
+        CountDownLatch permitHeld = new CountDownLatch(1);
+        CountDownLatch releasePermit = new CountDownLatch(1);
+        Thread holder = Thread.ofVirtual().start(() -> capacityGuard.runWithinCapacity(() -> {
+            permitHeld.countDown();
+            awaitQuietly(releasePermit);
+            return null;
+        }));
+        permitHeld.await();
+
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1"))
+                .isInstanceOf(RateLimitedException.class);
+
+        releasePermit.countDown();
+        holder.join();
+
+        verify(sourceResolutionService, never()).resolve(any());
+        assertThatCode(() -> usageLimiter.checkAndRecordRequest("session-1")).doesNotThrowAnyException();
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Test
