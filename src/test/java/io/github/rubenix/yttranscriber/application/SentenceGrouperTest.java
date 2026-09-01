@@ -103,4 +103,55 @@ class SentenceGrouperTest {
 
         assertThat(result).extracting(TranscriptSegment::sequence).containsExactly(0, 1);
     }
+
+    @Test
+    void timesTheLineFromItsFirstSpokenCue_notFromAMusicMarkerMergedInFrontOfIt() {
+        // Real whisper.cpp output for a song with a 12s instrumental intro: the intro is its own
+        // cue reading "♪", and the singing only starts at 12s. Merged in, it used to hand the line
+        // a 0-22s window, so at 12s -- the very first sung word -- the read-along sweep was already
+        // 55% through the lyrics, sitting on "campos".
+        List<TranscriptSegment> segments = List.of(
+                new TranscriptSegment(0, 0, 12_000, "♪"),
+                new TranscriptSegment(1, 12_000, 22_000, "♪ Dejaré mi tierra por ti, dejaré mis campos y me iré, lejos de aquí ♪"));
+
+        List<TranscriptSegment> merged = grouper.group(segments);
+
+        assertThat(merged).hasSize(1);
+        assertThat(merged.get(0).startMs()).isEqualTo(12_000);
+        assertThat(merged.get(0).endMs()).isEqualTo(22_000);
+        // The marker is still part of the text -- it just no longer sets the clock.
+        assertThat(merged.get(0).text()).startsWith("♪ ♪ Dejaré");
+    }
+
+    @Test
+    void treatsABracketedAnnotationAsNonSpeechToo() {
+        List<TranscriptSegment> segments = List.of(
+                new TranscriptSegment(0, 0, 8_000, "[Music]"),
+                new TranscriptSegment(1, 8_000, 14_000, "We are no strangers to love"));
+
+        List<TranscriptSegment> merged = grouper.group(segments);
+
+        assertThat(merged.get(0).startMs()).isEqualTo(8_000);
+    }
+
+    @Test
+    void keepsTheOriginalWindowWhenNothingInTheLineIsSpeech() {
+        List<TranscriptSegment> segments = List.of(new TranscriptSegment(0, 0, 9_000, "♪"));
+
+        List<TranscriptSegment> merged = grouper.group(segments);
+
+        assertThat(merged.get(0).startMs()).isEqualTo(0);
+        assertThat(merged.get(0).endMs()).isEqualTo(9_000);
+    }
+
+    @Test
+    void stopsTheLineAtItsLastSpokenCueWhenATrailingMarkerFollows() {
+        List<TranscriptSegment> segments = List.of(
+                new TranscriptSegment(0, 0, 4_000, "Hola a todos"),
+                new TranscriptSegment(1, 4_000, 13_000, "♪"));
+
+        List<TranscriptSegment> merged = grouper.group(segments);
+
+        assertThat(merged.get(0).endMs()).isEqualTo(4_000);
+    }
 }
