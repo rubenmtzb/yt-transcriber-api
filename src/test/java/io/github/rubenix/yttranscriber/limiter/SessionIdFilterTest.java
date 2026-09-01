@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,7 +57,7 @@ class SessionIdFilterTest {
         filter.doFilter(request, response, chain);
 
         verify(request).setAttribute(SessionIdFilter.REQUEST_ATTRIBUTE, "from-header");
-        verify(request, org.mockito.Mockito.never()).getParameter(SessionIdFilter.QUERY_PARAM_NAME);
+        verify(request, never()).getParameter(SessionIdFilter.QUERY_PARAM_NAME);
     }
 
     @Test

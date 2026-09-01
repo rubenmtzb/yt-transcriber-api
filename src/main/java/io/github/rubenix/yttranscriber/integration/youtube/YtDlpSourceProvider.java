@@ -2,7 +2,6 @@ package io.github.rubenix.yttranscriber.integration.youtube;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import tools.jackson.databind.ObjectMapper;
 import io.github.rubenix.yttranscriber.domain.source.SourceProvider;
 import io.github.rubenix.yttranscriber.domain.source.SourceRequest;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
@@ -17,6 +16,7 @@ import io.github.rubenix.yttranscriber.integration.process.TempWorkspace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -72,10 +72,6 @@ public class YtDlpSourceProvider implements SourceProvider {
                 ? TranscriptSource.MANUAL_CAPTIONS
                 : TranscriptSource.AUTOMATIC_CAPTIONS;
         return new SourceResolution(video, track.get().language(), segments, source);
-    }
-
-    VideoMetadata fetchMetadata(String youtubeUrl) {
-        return toVideoMetadata(fetchRawInfo(youtubeUrl));
     }
 
     private RawVideoInfo fetchRawInfo(String youtubeUrl) {
@@ -174,7 +170,8 @@ public class YtDlpSourceProvider implements SourceProvider {
     }
 
     List<TranscriptSegment> fetchSegments(String youtubeUrl, String videoId, CaptionTrack track) {
-        try (TempWorkspace workspace = TempWorkspace.create("ytdlp-subs-")) {
+        try (TempWorkspace workspace = TempWorkspace.create(
+                "ytdlp-subs-", "Could not create a temporary directory for subtitle download.")) {
             SubtitleAttempt attempt = downloadSubtitleFile(youtubeUrl, videoId, workspace.directory(), track);
             if (attempt.file().isPresent()) {
                 return parseSegments(attempt.file().get());

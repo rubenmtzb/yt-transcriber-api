@@ -136,46 +136,39 @@ class UsageLimiterTest {
         assertThatCode(() -> limiter.checkAndRecordRequest("curious")).doesNotThrowAnyException();
     }
 
-        @Test
-    void forgetsSessionsWhoseWholeWindowHasAgedOut() {
-        // The map used to keep every session the process had ever seen, which grows without bound
-        // on a long-lived instance.
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2), clock);
-        limiter.checkAndRecordRequest("old-visitor");
-        limiter.checkAndRecordAudioMinutes("old-visitor", 60);
+    @Test
+    void dropsSessionsWhoseWindowsHaveFullyExpired() {
+        // Anonymous ids are minted per browser and mostly never come back, so without this sweep
+        // the map gains an entry per distinct caller and never releases one.
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2), clock);
 
-        clock.advance(Duration.ofHours(1).plusMinutes(1));
-        limiter.checkAndRecordRequest("someone-else");
+        limiter.checkAndRecordRequest("session-a");
+        limiter.checkAndRecordAudioMinutes("session-b", 120);
+        assertThat(limiter.trackedSessionCount()).isEqualTo(2);
 
-        assertThat(limiter.trackedSessions()).containsExactly("someone-else");
+        // past the usage window, so both are spent, and past the sweep interval, so a pass is due
+        clock.advance(Duration.ofHours(1).plusMinutes(6));
+        limiter.checkAndRecordRequest("session-c");
+
+        assertThat(limiter.trackedSessionCount()).isEqualTo(1);
     }
 
     @Test
-    void keepsASessionThatStillHasUsageInsideItsWindow() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2), clock);
-        limiter.checkAndRecordRequest("active");
-
-        clock.advance(Duration.ofMinutes(30));
-        limiter.checkAndRecordRequest("someone-else");
-
-        assertThat(limiter.trackedSessions()).contains("active", "someone-else");
-    }
-
-        @Test
-    void doesNotSweepTheWholeMapOnEveryRequest() {
-        // A sweep walks and locks every live session, which at scale costs more than the request
-        // it is attached to. Nothing can expire in under an hour, so it is throttled -- and a
-        // session that ages out between sweeps simply survives until the next one.
+    void keepsSessionsStillInsideTheirWindowWhenSweeping() {
         UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2), clock);
-        limiter.checkAndRecordRequest("ages-out");
 
-        clock.advance(Duration.ofHours(1).plusSeconds(1));
-        // Far enough for the entry to have expired, but the sweep that would notice has just run.
-        limiter.checkAndRecordRequest("first");
-        clock.advance(Duration.ofSeconds(5));
-        limiter.checkAndRecordRequest("second");
+        limiter.checkAndRecordRequest("session-a");
 
-        assertThat(limiter.trackedSessions()).contains("first", "second");
+        // past the sweep interval but well inside the one-hour window: session-a is still live
+        clock.advance(Duration.ofMinutes(6));
+        limiter.checkAndRecordRequest("session-b");
+
+        assertThat(limiter.trackedSessionCount()).isEqualTo(2);
+        assertThatThrownBy(() -> {
+            for (int i = 0; i < 5; i++) {
+                limiter.checkAndRecordRequest("session-a");
+            }
+        }).isInstanceOf(RateLimitedException.class);
     }
 
     private static final class MutableClock extends Clock {

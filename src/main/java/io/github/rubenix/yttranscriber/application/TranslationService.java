@@ -30,7 +30,10 @@ public class TranslationService {
                             segment.text(), segment.text(), segment.words()))
                     .toList();
         }
-        return translationProvider.translate(new TranslationRequest(segments, sourceLanguage, targetLanguage));
+        // sourceLanguage is only used for the same-language check above -- it never reaches
+        // TranslationRequest, since DeepL is left to auto-detect and no code path maps YouTube's
+        // caption-track language codes onto DeepL's accepted source_lang vocabulary.
+        return translationProvider.translate(new TranslationRequest(segments, targetLanguage));
     }
 
     private boolean sameLanguage(String sourceLanguage, String targetLanguage) {

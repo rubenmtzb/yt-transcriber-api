@@ -21,7 +21,7 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins(properties.allowedOrigins())
+                        .allowedOrigins(properties.allowedOrigins().toArray(String[]::new))
                         .allowedMethods("GET", "POST", "OPTIONS")
                         .allowedHeaders("*")
                         .exposedHeaders("X-Session-Id", "X-Request-Id")

@@ -11,7 +11,7 @@ class TempWorkspaceTest {
 
     @Test
     void handsOutADirectoryThatExists() {
-        try (TempWorkspace workspace = TempWorkspace.create("test-")) {
+        try (TempWorkspace workspace = TempWorkspace.create("test-", "boom")) {
             assertThat(Files.isDirectory(workspace.directory())).isTrue();
         }
     }
@@ -19,11 +19,11 @@ class TempWorkspaceTest {
     @Test
     void deletesTheDirectoryAndEverythingWrittenIntoIt() throws Exception {
         Path directory;
-        try (TempWorkspace workspace = TempWorkspace.create("test-")) {
+        try (TempWorkspace workspace = TempWorkspace.create("test-", "boom")) {
             directory = workspace.directory();
-            Files.writeString(workspace.resolve("output.json"), "{}");
-            Files.createDirectory(workspace.resolve("nested"));
-            Files.writeString(workspace.resolve("nested").resolve("more.txt"), "x");
+            Files.writeString(workspace.directory().resolve("output.json"), "{}");
+            Files.createDirectory(workspace.directory().resolve("nested"));
+            Files.writeString(workspace.directory().resolve("nested").resolve("more.txt"), "x");
         }
 
         assertThat(Files.exists(directory)).isFalse();
@@ -31,11 +31,11 @@ class TempWorkspaceTest {
 
     @Test
     void cleansUpEvenWhenTheWorkCameToAnAbruptEnd() {
-        TempWorkspace workspace = TempWorkspace.create("test-");
+        TempWorkspace workspace = TempWorkspace.create("test-", "boom");
         Path directory = workspace.directory();
 
         try (workspace) {
-            Files.writeString(workspace.resolve("half-written"), "partial");
+            Files.writeString(workspace.directory().resolve("half-written"), "partial");
             throw new IllegalStateException("boom");
         } catch (Exception ignored) {
             // the point is what happened to the directory, not the exception
@@ -46,7 +46,7 @@ class TempWorkspaceTest {
 
     @Test
     void survivesADirectoryThatIsAlreadyGone() throws Exception {
-        TempWorkspace workspace = TempWorkspace.create("test-");
+        TempWorkspace workspace = TempWorkspace.create("test-", "boom");
         Files.delete(workspace.directory());
 
         // Cleanup is best-effort: it must never throw over the caller's own outcome.

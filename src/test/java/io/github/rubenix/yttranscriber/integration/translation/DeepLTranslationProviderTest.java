@@ -28,7 +28,7 @@ class DeepLTranslationProviderTest {
     @Test
     void failsFastWhenNoApiKeyIsConfigured() {
         var provider = new DeepLTranslationProvider(RestClient.builder(), new DeepLProperties(""));
-        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "en", "es");
+        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "es");
 
         assertThatThrownBy(() -> provider.translate(request))
                 .isInstanceOf(ProviderUnavailableException.class);
@@ -37,7 +37,7 @@ class DeepLTranslationProviderTest {
     @Test
     void returnsEmptyListWithoutCallingDeepLWhenThereAreNoSegments() {
         var provider = new DeepLTranslationProvider(RestClient.builder(), new DeepLProperties("dummy-key:fx"));
-        var request = new TranslationRequest(List.of(), "en", "es");
+        var request = new TranslationRequest(List.of(), "es");
 
         assertThat(provider.translate(request)).isEmpty();
     }
@@ -57,7 +57,7 @@ class DeepLTranslationProviderTest {
         var segments = List.of(
                 new TranscriptSegment(0, 0, 1000, "Hello everybody"),
                 new TranscriptSegment(1, 1000, 2000, "How are you"));
-        var request = new TranslationRequest(segments, "en", "es");
+        var request = new TranslationRequest(segments, "es");
 
         List<TranslatedSegment> result = provider.translate(request);
 
@@ -75,7 +75,7 @@ class DeepLTranslationProviderTest {
                 .andRespond(withStatus(HttpStatusCode.valueOf(429)));
 
         var provider = new DeepLTranslationProvider(builder, new DeepLProperties("test-key:fx"));
-        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "en", "es");
+        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "es");
 
         assertThatThrownBy(() -> provider.translate(request))
                 .isInstanceOf(RateLimitedException.class);
@@ -89,7 +89,7 @@ class DeepLTranslationProviderTest {
                 .andRespond(withStatus(HttpStatusCode.valueOf(456)));
 
         var provider = new DeepLTranslationProvider(builder, new DeepLProperties("test-key:fx"));
-        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "en", "es");
+        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "es");
 
         assertThatThrownBy(() -> provider.translate(request))
                 .isInstanceOf(TranslationQuotaExceededException.class);

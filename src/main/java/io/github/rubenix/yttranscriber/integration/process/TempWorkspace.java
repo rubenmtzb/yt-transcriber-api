@@ -9,12 +9,11 @@ import java.util.Comparator;
 import java.util.stream.Stream;
 
 /**
- * A scratch directory for one external-tool run, deleted when the run finishes.
- *
- * Both providers shell out to tools that write their output to disk (yt-dlp its subtitle file,
- * whisper-cli its transcript) and each had its own copy of the same create-and-clean-up code.
- * Being {@link AutoCloseable} also means the cleanup rides on try-with-resources instead of a
- * finally block that a future early return could slip past.
+ * A throwaway directory handed to an external tool as its output location, deleted when the run
+ * finishes. Shared by every integration that shells out to a binary that writes files (yt-dlp's
+ * subtitle and audio downloads, whisper-cli's JSON transcript) rather than just printing to
+ * stdout. Implements {@link AutoCloseable} so call sites express the lifetime as
+ * try-with-resources and cannot forget the cleanup.
  */
 public final class TempWorkspace implements AutoCloseable {
 
@@ -24,11 +23,17 @@ public final class TempWorkspace implements AutoCloseable {
         this.directory = directory;
     }
 
-    public static TempWorkspace create(String prefix) {
+    /**
+     * @param prefix         name prefix for the created directory, to make stray leftovers
+     *                       traceable to the integration that made them
+     * @param failureMessage user-facing message for the {@link ProviderUnavailableException}
+     *                       raised when the directory cannot be created
+     */
+    public static TempWorkspace create(String prefix, String failureMessage) {
         try {
             return new TempWorkspace(Files.createTempDirectory(prefix));
         } catch (IOException e) {
-            throw new ProviderUnavailableException("Could not create a temporary working directory.");
+            throw new ProviderUnavailableException(failureMessage);
         }
     }
 
@@ -36,17 +41,16 @@ public final class TempWorkspace implements AutoCloseable {
         return directory;
     }
 
-    public Path resolve(String fileName) {
-        return directory.resolve(fileName);
-    }
-
     @Override
     public void close() {
-        try (Stream<Path> paths = Files.walk(directory)) {
+        deleteRecursively(directory);
+    }
+
+    private static void deleteRecursively(Path dir) {
+        try (Stream<Path> paths = Files.walk(dir)) {
             paths.sorted(Comparator.reverseOrder()).forEach(TempWorkspace::deleteQuietly);
         } catch (IOException ignored) {
-            // Best-effort: the OS reclaims its temp directory regardless, and failing to tidy up
-            // must never mask whatever the caller was actually doing.
+            // best-effort cleanup; the OS will reclaim the temp dir eventually regardless
         }
     }
 
@@ -54,7 +58,7 @@ public final class TempWorkspace implements AutoCloseable {
         try {
             Files.delete(path);
         } catch (IOException ignored) {
-            // see close()
+            // best-effort cleanup of an ephemeral temp file
         }
     }
 }

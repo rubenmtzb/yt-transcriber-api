@@ -1,7 +1,6 @@
 package io.github.rubenix.yttranscriber.integration.transcription;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import tools.jackson.databind.ObjectMapper;
 import io.github.rubenix.yttranscriber.domain.transcription.TimedWord;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome;
@@ -15,8 +14,8 @@ import io.github.rubenix.yttranscriber.integration.youtube.YtDlpProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -66,7 +65,8 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
                             .formatted(whisperProperties.minAudioDurationSeconds()));
         }
 
-        try (TempWorkspace workspace = TempWorkspace.create("whisper-stt-")) {
+        try (TempWorkspace workspace = TempWorkspace.create(
+                "whisper-stt-", "Could not create a temporary directory for transcription.")) {
             Path audioFile = extractAudio(request.youtubeUrl(), request.video().id(), workspace.directory());
             WhisperOutput output = runWhisper(audioFile, workspace.directory(), request.sourceLanguage());
             List<TranscriptSegment> segments = toSegments(output);

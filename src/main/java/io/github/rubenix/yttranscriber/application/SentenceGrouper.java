@@ -49,9 +49,7 @@ public class SentenceGrouper {
                     && previousEndMs != null
                     && (segment.startMs() - previousEndMs) >= GAP_BREAK_MS;
             if (gapBreak) {
-                merged.add(close(merged.size(), groupStart, groupEnd, spokenStart, spokenEnd, buffer, words));
-                buffer.setLength(0);
-                words.clear();
+                flush(merged, buffer, words, groupStart, groupEnd, spokenStart, spokenEnd);
                 wordCount = 0;
                 spokenStart = null;
                 spokenEnd = null;
@@ -78,9 +76,7 @@ public class SentenceGrouper {
 
             boolean overCap = wordCount >= MAX_GROUP_WORDS || (groupEnd - groupStart) >= MAX_GROUP_SPAN_MS;
             if (endsWithSentenceTerminator(text) || overCap) {
-                merged.add(close(merged.size(), groupStart, groupEnd, spokenStart, spokenEnd, buffer, words));
-                buffer.setLength(0);
-                words.clear();
+                flush(merged, buffer, words, groupStart, groupEnd, spokenStart, spokenEnd);
                 wordCount = 0;
                 spokenStart = null;
                 spokenEnd = null;
@@ -88,26 +84,30 @@ public class SentenceGrouper {
         }
 
         if (!buffer.isEmpty()) {
-            merged.add(close(merged.size(), groupStart, groupEnd, spokenStart, spokenEnd, buffer, words));
+            flush(merged, buffer, words, groupStart, groupEnd, spokenStart, spokenEnd);
         }
 
         return merged;
     }
 
     /**
-     * Times the merged line by the cues that actually carry words, not by every cue swept into it.
+     * Closes the group accumulated in {@code buffer}, appending it to {@code merged} and resetting
+     * the accumulated state.
      *
-     * A silent stretch is still transcribed: Whisper hands back a cue reading "♪" for a song's
-     * instrumental intro, captions hand back "[Music]". Merged in, those drag the line's start
+     * The line is timed by the cues that actually carry words, not by every cue swept into it. A
+     * silent stretch is still transcribed: Whisper hands back a cue reading "♪" for a song's
+     * instrumental intro, captions hand back "[Music]". Timed in, those drag the line's start
      * backwards -- one real case gave a line spanning 0-22s whose singing only begins at 12s, so
      * anything paced by the line's duration was already two thirds through the lyrics by the time
      * the first word was sung. The annotation stays in the text; it just stops setting the clock.
      */
-    private TranscriptSegment close(int sequence, long groupStart, long groupEnd, Long spokenStart,
-                                     Long spokenEnd, StringBuilder buffer, List<TimedWord> words) {
+    private static void flush(List<TranscriptSegment> merged, StringBuilder buffer, List<TimedWord> words,
+                              long groupStart, long groupEnd, Long spokenStart, Long spokenEnd) {
         long startMs = spokenStart != null ? spokenStart : groupStart;
         long endMs = spokenEnd != null ? spokenEnd : groupEnd;
-        return new TranscriptSegment(sequence, startMs, endMs, buffer.toString(), List.copyOf(words));
+        merged.add(new TranscriptSegment(merged.size(), startMs, endMs, buffer.toString(), List.copyOf(words)));
+        buffer.setLength(0);
+        words.clear();
     }
 
     private static boolean carriesSpeech(String text) {
@@ -115,8 +115,9 @@ public class SentenceGrouper {
         return WORD_CHARACTER.matcher(withoutAnnotations).find();
     }
 
+    /** Counts words in already-stripped text, so no further trimming is needed here. */
     private static int countWords(String text) {
-        return text.isBlank() ? 0 : text.trim().split("\\s+").length;
+        return text.split("\\s+").length;
     }
 
     private static boolean endsWithSentenceTerminator(String text) {
