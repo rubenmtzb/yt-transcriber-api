@@ -97,8 +97,8 @@ public class DeepLTranslationProvider implements TranslationProvider {
                 .mapToObj(i -> {
                     TranscriptSegment segment = segments.get(i);
                     String translatedText = translations.get(i).text();
-                    return new TranslatedSegment(
-                            segment.sequence(), segment.startMs(), segment.endMs(), segment.text(), translatedText);
+                    return new TranslatedSegment(segment.sequence(), segment.startMs(), segment.endMs(),
+                            segment.text(), translatedText, segment.words());
                 })
                 .toList();
     }

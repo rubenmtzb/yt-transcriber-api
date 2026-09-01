@@ -26,8 +26,8 @@ public class TranslationService {
             // compare against targetLanguage (always exactly two letters, per the request DTO) is
             // enough here.
             return segments.stream()
-                    .map(segment -> new TranslatedSegment(
-                            segment.sequence(), segment.startMs(), segment.endMs(), segment.text(), segment.text()))
+                    .map(segment -> new TranslatedSegment(segment.sequence(), segment.startMs(), segment.endMs(),
+                            segment.text(), segment.text(), segment.words()))
                     .toList();
         }
         return translationProvider.translate(new TranslationRequest(segments, sourceLanguage, targetLanguage));

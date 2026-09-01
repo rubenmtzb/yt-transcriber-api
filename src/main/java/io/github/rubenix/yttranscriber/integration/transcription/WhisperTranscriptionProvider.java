@@ -2,6 +2,7 @@ package io.github.rubenix.yttranscriber.integration.transcription;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import tools.jackson.databind.ObjectMapper;
+import io.github.rubenix.yttranscriber.domain.transcription.TimedWord;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionProvider;
@@ -9,6 +10,7 @@ import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionRequest
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.UnsupportedSourceException;
 import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner;
+import io.github.rubenix.yttranscriber.integration.process.TempWorkspace;
 import io.github.rubenix.yttranscriber.integration.youtube.YtDlpProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,9 +21,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Stream;
+import java.util.regex.Pattern;
 
 /**
  * TranscriptionProvider backed by a local whisper.cpp install: extracts the video's audio with
@@ -35,6 +36,8 @@ import java.util.stream.Stream;
 public class WhisperTranscriptionProvider implements TranscriptionProvider {
 
     private static final Logger log = LoggerFactory.getLogger(WhisperTranscriptionProvider.class);
+    // whisper.cpp's own markers -- [_BEG_], [_TT_600] and friends -- which are structure, not speech.
+    private static final Pattern CONTROL_TOKEN = Pattern.compile("\\s*\\[_[A-Z_0-9]+]\\s*");
 
     private final ExternalProcessRunner processRunner;
     private final ObjectMapper objectMapper;
@@ -63,17 +66,14 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
                             .formatted(whisperProperties.minAudioDurationSeconds()));
         }
 
-        Path tempDir = createTempDirectory();
-        try {
-            Path audioFile = extractAudio(request.youtubeUrl(), request.video().id(), tempDir);
-            WhisperOutput output = runWhisper(audioFile, tempDir, request.sourceLanguage());
+        try (TempWorkspace workspace = TempWorkspace.create("whisper-stt-")) {
+            Path audioFile = extractAudio(request.youtubeUrl(), request.video().id(), workspace.directory());
+            WhisperOutput output = runWhisper(audioFile, workspace.directory(), request.sourceLanguage());
             List<TranscriptSegment> segments = toSegments(output);
             if (segments.isEmpty()) {
                 throw new UnsupportedSourceException("Could not detect any speech in this video's audio.");
             }
             return new TranscriptionOutcome(output.language(), segments);
-        } finally {
-            deleteRecursively(tempDir);
         }
     }
 
@@ -104,7 +104,7 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
                 "-m", whisperProperties.modelPath(),
                 "-f", audioFile.toString(),
                 "-l", languageHint != null && !languageHint.isBlank() ? languageHint : "auto",
-                "-oj",
+                "-ojf",
                 "-of", outputBase.toString(),
                 "-np");
 
@@ -134,33 +134,9 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
             }
             long startMs = segment.offsets().from() != null ? segment.offsets().from() : 0L;
             long endMs = segment.offsets().to() != null ? segment.offsets().to() : startMs;
-            segments.add(new TranscriptSegment(sequence++, startMs, endMs, text));
+            segments.add(new TranscriptSegment(sequence++, startMs, endMs, text, wordsOf(segment)));
         }
         return segments;
-    }
-
-    private Path createTempDirectory() {
-        try {
-            return Files.createTempDirectory("whisper-stt-");
-        } catch (IOException e) {
-            throw new ProviderUnavailableException("Could not create a temporary directory for transcription.");
-        }
-    }
-
-    private void deleteRecursively(Path dir) {
-        try (Stream<Path> paths = Files.walk(dir)) {
-            paths.sorted(Comparator.reverseOrder()).forEach(this::deleteQuietly);
-        } catch (IOException ignored) {
-            // best-effort cleanup; the OS will reclaim the temp dir eventually regardless
-        }
-    }
-
-    private void deleteQuietly(Path path) {
-        try {
-            Files.delete(path);
-        } catch (IOException ignored) {
-            // best-effort cleanup of an ephemeral temp file
-        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -174,8 +150,55 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
     record WhisperResult(String language) {
     }
 
+    /**
+     * Rebuilds whole words out of whisper.cpp's tokens.
+     *
+     * The model emits sub-word pieces -- "Deja" then "ré" -- each with its own offsets, so a token
+     * is not a word. A leading space is what marks the start of a new one, which is why pieces are
+     * appended rather than joined. Control tokens like {@code [_BEG_]} and the timestamp markers
+     * carry no text and are dropped.
+     */
+    private List<TimedWord> wordsOf(WhisperSegment segment) {
+        if (segment.tokens() == null) {
+            return List.of();
+        }
+
+        List<TimedWord> words = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        long currentStartMs = 0;
+        long currentEndMs = 0;
+
+        for (WhisperToken token : segment.tokens()) {
+            String piece = token.text();
+            if (piece == null || token.offsets() == null || CONTROL_TOKEN.matcher(piece).matches()) {
+                continue;
+            }
+            long from = token.offsets().from() != null ? token.offsets().from() : 0L;
+            long to = token.offsets().to() != null ? token.offsets().to() : from;
+
+            boolean startsNewWord = piece.startsWith(" ") || current.isEmpty();
+            if (startsNewWord && !current.isEmpty()) {
+                words.add(new TimedWord(current.toString(), currentStartMs, currentEndMs));
+                current.setLength(0);
+            }
+            if (current.isEmpty()) {
+                currentStartMs = from;
+            }
+            current.append(piece);
+            currentEndMs = Math.max(currentEndMs, to);
+        }
+        if (!current.isEmpty()) {
+            words.add(new TimedWord(current.toString(), currentStartMs, currentEndMs));
+        }
+        return words.size() < 2 ? List.of() : words;
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record WhisperSegment(WhisperOffsets offsets, String text) {
+    record WhisperSegment(WhisperOffsets offsets, String text, List<WhisperToken> tokens) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record WhisperToken(String text, WhisperOffsets offsets) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

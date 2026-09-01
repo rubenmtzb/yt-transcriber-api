@@ -5,6 +5,7 @@ import io.github.rubenix.yttranscriber.domain.source.SourceRequest;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSource;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.UnsupportedSourceException;
 import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner;
@@ -182,6 +183,29 @@ class YtDlpSourceProviderTest {
 
         assertThat(resolution.sourceLanguage()).isEqualTo("ru");
         assertThat(resolution.segments()).hasSize(2);
+        assertThat(resolution.source()).isEqualTo(TranscriptSource.AUTOMATIC_CAPTIONS);
+    }
+
+    @Test
+    void reportsAnUploaderWrittenTrackAsManualCaptions() {
+        // Readers are told which of these produced the text: the uploader's own captions keep real
+        // punctuation and spell names right, where YouTube's recognition routinely mangles both.
+        when(processRunner.run(any(), any())).thenAnswer(invocation -> {
+            List<String> command = invocation.getArgument(0);
+            if (command.contains("--print")) {
+                return new ProcessResult(0, """
+                        {"id": "man123", "title": "Subtitled by hand", "duration": 90, "availability": "public",
+                         "is_live": false, "language": "es", "subtitles": {"es": []}, "automatic_captions": {}}
+                        """, "");
+            }
+            Path dir = Path.of(command.get(command.indexOf("-P") + 1));
+            Files.writeString(dir.resolve("man123.es.json3"), SAMPLE_JSON3);
+            return new ProcessResult(0, "", "");
+        });
+
+        SourceResolution resolution = sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=man123"));
+
+        assertThat(resolution.source()).isEqualTo(TranscriptSource.MANUAL_CAPTIONS);
     }
 
     @Test
@@ -198,6 +222,7 @@ class YtDlpSourceProviderTest {
 
         assertThat(resolution.segments()).isEmpty();
         assertThat(resolution.video().id()).isEqualTo("silent123");
+        assertThat(resolution.source()).isEqualTo(TranscriptSource.SPEECH_TO_TEXT);
     }
 
     private static final String SAMPLE_JSON3 = """
@@ -224,6 +249,47 @@ class YtDlpSourceProviderTest {
     }
 
     @Test
+    void trimsACueThatStaysOnScreenPastTheStartOfTheNextOne() {
+        // Rolling auto-captions leave a line up while the next appears, so a cue's declared
+        // duration overruns the following cue. Taken verbatim it stretches the merged line's
+        // duration and drags anything paced by it behind the audio.
+        CaptionTrack track = new CaptionTrack("en", false);
+        writeSubtitleFile(track, """
+                {
+                  "events": [
+                    { "tStartMs": 52600, "dDurationMs": 14070, "segs": [ { "utf8": "I tried so hard" } ] },
+                    { "tStartMs": 61300, "dDurationMs": 11700, "segs": [ { "utf8": "and got so far" } ] }
+                  ]
+                }
+                """);
+
+        List<TranscriptSegment> segments = sourceProvider.fetchSegments(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ", track);
+
+        assertThat(segments.get(0)).isEqualTo(new TranscriptSegment(0, 52600, 61300, "I tried so hard"));
+        // The last cue has nothing to be trimmed against, so it keeps its declared end.
+        assertThat(segments.get(1)).isEqualTo(new TranscriptSegment(1, 61300, 73000, "and got so far"));
+    }
+
+    @Test
+    void leavesACueAloneWhenItAlreadyEndsBeforeTheNextBegins() {
+        CaptionTrack track = new CaptionTrack("en", true);
+        writeSubtitleFile(track, """
+                {
+                  "events": [
+                    { "tStartMs": 1000, "dDurationMs": 500, "segs": [ { "utf8": "uno" } ] },
+                    { "tStartMs": 9000, "dDurationMs": 500, "segs": [ { "utf8": "dos" } ] }
+                  ]
+                }
+                """);
+
+        List<TranscriptSegment> segments = sourceProvider.fetchSegments(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ", track);
+
+        assertThat(segments.get(0).endMs()).isEqualTo(1500);
+    }
+
+    @Test
     void rejectsWhenTheSelectedTrackTurnsOutNotToExistAfterAll() {
         when(processRunner.run(any(), any())).thenReturn(new ProcessResult(0, "", ""));
 
@@ -247,12 +313,16 @@ class YtDlpSourceProviderTest {
     }
 
     private void writeSubtitleFileFor(CaptionTrack track) {
+        writeSubtitleFile(track, SAMPLE_JSON3);
+    }
+
+    private void writeSubtitleFile(CaptionTrack track, String json3) {
         when(processRunner.run(any(), any())).thenAnswer(invocation -> {
             List<String> command = invocation.getArgument(0);
             String expectedFlag = track.manual() ? "--write-subs" : "--write-auto-subs";
             if (command.contains(expectedFlag)) {
                 Path dir = Path.of(command.get(command.indexOf("-P") + 1));
-                Files.writeString(dir.resolve("dQw4w9WgXcQ." + track.language() + ".json3"), SAMPLE_JSON3);
+                Files.writeString(dir.resolve("dQw4w9WgXcQ." + track.language() + ".json3"), json3);
             }
             return new ProcessResult(0, "", "");
         });

@@ -7,10 +7,13 @@ import io.github.rubenix.yttranscriber.domain.source.SourceProvider;
 import io.github.rubenix.yttranscriber.domain.source.SourceRequest;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
+import io.github.rubenix.yttranscriber.domain.transcription.TimedWord;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSource;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.UnsupportedSourceException;
 import io.github.rubenix.yttranscriber.integration.process.ExternalProcessRunner;
+import io.github.rubenix.yttranscriber.integration.process.TempWorkspace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -20,7 +23,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,11 +64,14 @@ public class YtDlpSourceProvider implements SourceProvider {
             // TranscriptionService to fall back to real Speech-to-Text (TranscriptionProvider).
             // info.language() is passed through as a hint (may be null); Whisper auto-detects
             // on its own when it's absent.
-            return new SourceResolution(video, info.language(), List.of());
+            return new SourceResolution(video, info.language(), List.of(), TranscriptSource.SPEECH_TO_TEXT);
         }
 
         List<TranscriptSegment> segments = fetchSegments(request.youtubeUrl(), video.id(), track.get());
-        return new SourceResolution(video, track.get().language(), segments);
+        TranscriptSource source = track.get().manual()
+                ? TranscriptSource.MANUAL_CAPTIONS
+                : TranscriptSource.AUTOMATIC_CAPTIONS;
+        return new SourceResolution(video, track.get().language(), segments, source);
     }
 
     VideoMetadata fetchMetadata(String youtubeUrl) {
@@ -169,9 +174,8 @@ public class YtDlpSourceProvider implements SourceProvider {
     }
 
     List<TranscriptSegment> fetchSegments(String youtubeUrl, String videoId, CaptionTrack track) {
-        Path tempDir = createTempDirectory();
-        try {
-            SubtitleAttempt attempt = downloadSubtitleFile(youtubeUrl, videoId, tempDir, track);
+        try (TempWorkspace workspace = TempWorkspace.create("ytdlp-subs-")) {
+            SubtitleAttempt attempt = downloadSubtitleFile(youtubeUrl, videoId, workspace.directory(), track);
             if (attempt.file().isPresent()) {
                 return parseSegments(attempt.file().get());
             }
@@ -188,8 +192,6 @@ public class YtDlpSourceProvider implements SourceProvider {
 
             throw new UnsupportedSourceException(
                     "No %s captions are available for this video.".formatted(track.language()));
-        } finally {
-            deleteRecursively(tempDir);
         }
     }
 
@@ -226,6 +228,14 @@ public class YtDlpSourceProvider implements SourceProvider {
         }
     }
 
+    /** Keeps the words inside the trimmed cue, so none of them outlives the line they belong to. */
+    private List<TimedWord> clampWords(List<TimedWord> words, long endMs) {
+        return words.stream()
+                .filter(word -> word.startMs() < endMs)
+                .map(word -> new TimedWord(word.text(), word.startMs(), Math.min(word.endMs(), endMs)))
+                .toList();
+    }
+
     private record SubtitleAttempt(Optional<Path> file, boolean failed, int exitCode, String stderr) {
     }
 
@@ -237,8 +247,8 @@ public class YtDlpSourceProvider implements SourceProvider {
             throw new ProviderUnavailableException("Could not parse the downloaded subtitle file.");
         }
 
-        List<TranscriptSegment> segments = new ArrayList<>();
         List<Json3Event> events = document.events() != null ? document.events() : List.of();
+        List<TranscriptSegment> cues = new ArrayList<>();
         int sequence = 0;
         for (Json3Event event : events) {
             if (event.segs() == null || event.segs().isEmpty()) {
@@ -254,33 +264,73 @@ public class YtDlpSourceProvider implements SourceProvider {
             }
             long startMs = event.tStartMs() != null ? event.tStartMs() : 0L;
             long durationMs = event.dDurationMs() != null ? event.dDurationMs() : 0L;
-            segments.add(new TranscriptSegment(sequence++, startMs, startMs + durationMs, text));
+            long endMs = startMs + durationMs;
+            cues.add(new TranscriptSegment(sequence++, startMs, endMs, text, wordsOf(event, startMs, endMs)));
         }
-        return segments;
+        return clampToNextCue(cues);
     }
 
-    private Path createTempDirectory() {
-        try {
-            return Files.createTempDirectory("ytdlp-subs-");
-        } catch (IOException e) {
-            throw new ProviderUnavailableException("Could not create a temporary directory for subtitle download.");
+    /**
+     * Reads the per-word timings YouTube ships alongside the text.
+     *
+     * Each {@code seg} is one word with a {@code tOffsetMs} measured from the cue's own start; the
+     * first word omits it, meaning zero. Only starts are given, so a word runs until the next one
+     * begins and the last runs to the end of the cue. Uploader-written tracks have a single seg per
+     * cue and no offsets, which yields nothing here -- exactly the "no word timings" case callers
+     * must already handle.
+     */
+    private List<TimedWord> wordsOf(Json3Event event, long cueStartMs, long cueEndMs) {
+        record Start(String text, long startMs) {
         }
+
+        List<Start> starts = new ArrayList<>();
+        for (Json3Seg seg : event.segs()) {
+            if (seg.utf8() == null || seg.utf8().isBlank()) {
+                continue;
+            }
+            starts.add(new Start(seg.utf8(), cueStartMs + (seg.tOffsetMs() != null ? seg.tOffsetMs() : 0L)));
+        }
+        if (starts.size() < 2) {
+            return List.of();
+        }
+
+        List<TimedWord> words = new ArrayList<>(starts.size());
+        for (int index = 0; index < starts.size(); index++) {
+            Start start = starts.get(index);
+            long endMs = index + 1 < starts.size() ? starts.get(index + 1).startMs() : cueEndMs;
+            words.add(new TimedWord(start.text(), start.startMs(), Math.max(start.startMs(), endMs)));
+        }
+        return words;
     }
 
-    private void deleteRecursively(Path dir) {
-        try (Stream<Path> paths = Files.walk(dir)) {
-            paths.sorted(Comparator.reverseOrder()).forEach(this::deleteQuietly);
-        } catch (IOException ignored) {
-            // best-effort cleanup; the OS will reclaim the temp dir eventually regardless
+    /**
+     * Trims each cue so it ends where the next one begins.
+     *
+     * A cue's declared duration is how long YouTube leaves the line *on screen*, not how long it
+     * takes to say: with rolling captions a line stays up while the next one appears underneath,
+     * so most cues overrun their successor. Measured on a real auto-captioned video, 46 of 56 cues
+     * ended after the next had already started, one of them claiming 15.3s for 12.1s of speech.
+     * Left alone that inflation is inherited by the merged line and stretches anything derived from
+     * the line's duration -- the read-along sweep drifts behind the audio and never reaches the end
+     * of a line before the next one takes over.
+     */
+    private List<TranscriptSegment> clampToNextCue(List<TranscriptSegment> cues) {
+        List<TranscriptSegment> clamped = new ArrayList<>(cues.size());
+        for (int index = 0; index < cues.size(); index++) {
+            TranscriptSegment cue = cues.get(index);
+            long endMs = cue.endMs();
+            if (index + 1 < cues.size()) {
+                long nextStartMs = cues.get(index + 1).startMs();
+                // Only ever shortens, and never past the cue's own start: out-of-order or
+                // zero-length cues keep whatever the source declared.
+                if (nextStartMs > cue.startMs() && nextStartMs < endMs) {
+                    endMs = nextStartMs;
+                }
+            }
+            clamped.add(new TranscriptSegment(
+                    cue.sequence(), cue.startMs(), endMs, cue.text(), clampWords(cue.words(), endMs)));
         }
-    }
-
-    private void deleteQuietly(Path path) {
-        try {
-            Files.delete(path);
-        } catch (IOException ignored) {
-            // best-effort cleanup of an ephemeral temp file
-        }
+        return clamped;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -292,6 +342,6 @@ public class YtDlpSourceProvider implements SourceProvider {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record Json3Seg(String utf8) {
+    private record Json3Seg(String utf8, Long tOffsetMs) {
     }
 }
