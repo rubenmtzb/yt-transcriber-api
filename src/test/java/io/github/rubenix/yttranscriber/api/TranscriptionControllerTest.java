@@ -1,7 +1,10 @@
 package io.github.rubenix.yttranscriber.api;
 
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSource;
 import io.github.rubenix.yttranscriber.application.TranscriptionResult;
 import io.github.rubenix.yttranscriber.application.TranscriptionService;
+import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
+import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
@@ -16,6 +19,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -29,12 +33,28 @@ class TranscriptionControllerTest {
     @MockitoBean
     private TranscriptionService transcriptionService;
 
+    @MockitoBean
+    private UsageLimiter usageLimiter;
+
+    @Test
+    void reportsTheSessionsRemainingBudget() throws Exception {
+        when(usageLimiter.remaining(anyString())).thenReturn(new UsageSnapshot(2, 3, 1800L, 45, 60, 1800L, 1200));
+
+        mockMvc.perform(get("/api/v1/transcriptions/usage"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requestsRemaining").value(2))
+                .andExpect(jsonPath("$.maxRequestsPerHour").value(3))
+                .andExpect(jsonPath("$.audioMinutesRemaining").value(45))
+                .andExpect(jsonPath("$.requestsResetInSeconds").value(1800))
+                .andExpect(jsonPath("$.maxVideoDurationSeconds").value(1200));
+    }
+
     @Test
     void returnsTheTranscriptionForAValidRequest() throws Exception {
         VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
         List<TranslatedSegment> segments = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
         when(transcriptionService.process(anyString(), anyString(), anyString()))
-                .thenReturn(new TranscriptionResult(video, "en", "es", segments));
+                .thenReturn(new TranscriptionResult(video, "en", "es", TranscriptSource.MANUAL_CAPTIONS, segments));
 
         mockMvc.perform(post("/api/v1/transcriptions")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -74,7 +94,7 @@ class TranscriptionControllerTest {
     void acceptsRealWorldYoutubeUrlShapesThatArentJustWatchVEqualsFirst() throws Exception {
         VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
         when(transcriptionService.process(anyString(), anyString(), anyString()))
-                .thenReturn(new TranscriptionResult(video, "en", "es", List.of()));
+                .thenReturn(new TranscriptionResult(video, "en", "es", TranscriptSource.MANUAL_CAPTIONS, List.of()));
 
         // playlist link where "v" isn't the first query param, m.youtube.com, and Shorts
         for (String url : List.of(

@@ -10,6 +10,8 @@ import io.github.rubenix.yttranscriber.exception.ApplicationException;
 import io.github.rubenix.yttranscriber.exception.ErrorCode;
 import io.github.rubenix.yttranscriber.exception.ErrorResponse;
 import io.github.rubenix.yttranscriber.limiter.SessionIdFilter;
+import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
+import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -39,9 +41,20 @@ public class TranscriptionController {
     private static final Logger log = LoggerFactory.getLogger(TranscriptionController.class);
 
     private final TranscriptionService transcriptionService;
+    private final UsageLimiter usageLimiter;
 
-    public TranscriptionController(TranscriptionService transcriptionService) {
+    public TranscriptionController(TranscriptionService transcriptionService, UsageLimiter usageLimiter) {
         this.transcriptionService = transcriptionService;
+        this.usageLimiter = usageLimiter;
+    }
+
+    /**
+     * What the caller has left of its hourly budget. Polled by the frontend so the limit can be
+     * shown before a request is spent instead of only surfacing as a refusal afterwards.
+     */
+    @GetMapping("/usage")
+    public UsageSnapshot usage(@RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId) {
+        return usageLimiter.remaining(sessionId);
     }
 
     @PostMapping
