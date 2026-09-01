@@ -86,7 +86,7 @@ public class TranscriptionService {
             List<TranslatedSegment> translated = translationService.translate(grouped, sourceLanguage, targetLanguage);
 
             progress.onStage(ProcessingStage.PREPARING_RESULT);
-            return new TranscriptionResult(resolution.video(), sourceLanguage, targetLanguage, translated);
+            return new TranscriptionResult(resolution.video(), sourceLanguage, targetLanguage, resolution.source(), translated);
         });
     }
 

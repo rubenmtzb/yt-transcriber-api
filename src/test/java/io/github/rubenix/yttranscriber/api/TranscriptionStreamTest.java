@@ -2,8 +2,11 @@ package io.github.rubenix.yttranscriber.api;
 
 import io.github.rubenix.yttranscriber.application.ProcessingStage;
 import io.github.rubenix.yttranscriber.application.ProgressListener;
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSource;
 import io.github.rubenix.yttranscriber.application.TranscriptionResult;
 import io.github.rubenix.yttranscriber.application.TranscriptionService;
+import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
+import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import org.junit.jupiter.api.Test;
@@ -46,7 +49,8 @@ class TranscriptionStreamTest {
                     listener.onStage(ProcessingStage.RESOLVING_VIDEO);
                     listener.onStage(ProcessingStage.TRANSLATING);
                     listener.onStage(ProcessingStage.PREPARING_RESULT);
-                    return new TranscriptionResult(new VideoMetadata("abc123", "Title", 90), "en", "es", List.of());
+                    return new TranscriptionResult(
+                            new VideoMetadata("abc123", "Title", 90), "en", "es", TranscriptSource.MANUAL_CAPTIONS, List.of());
                 });
 
         String body = get("https://youtu.be/abc123", "es");

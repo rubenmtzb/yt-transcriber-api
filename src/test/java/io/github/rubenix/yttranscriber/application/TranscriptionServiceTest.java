@@ -4,6 +4,7 @@ import io.github.rubenix.yttranscriber.config.ProcessingLimitsProperties;
 import io.github.rubenix.yttranscriber.domain.source.SourceResolution;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSource;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionProvider;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
@@ -60,7 +61,7 @@ class TranscriptionServiceTest {
     void rejectsVideosLongerThanTheConfiguredLimit() {
         VideoMetadata video = new VideoMetadata("abc123", "A very long video", 1201);
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", List.of()));
+                .thenReturn(new SourceResolution(video, "en", List.of(), TranscriptSource.SPEECH_TO_TEXT));
 
         assertThatThrownBy(() -> transcriptionService.process("https://youtu.be/abc123", "es", "session-1"))
                 .isInstanceOf(VideoTooLongException.class);
@@ -70,7 +71,7 @@ class TranscriptionServiceTest {
     void transcribesWhenTheSourceHasNoReadyMadeSegments() {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, null, List.of()));
+                .thenReturn(new SourceResolution(video, null, List.of(), TranscriptSource.SPEECH_TO_TEXT));
 
         List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("en", transcribed));
@@ -82,6 +83,22 @@ class TranscriptionServiceTest {
 
         assertThat(result.video()).isEqualTo(video);
         assertThat(result.segments()).isEqualTo(translated);
+        assertThat(result.source()).isEqualTo(TranscriptSource.SPEECH_TO_TEXT);
+    }
+
+    @Test
+    void passesTheSourceProviderVerdictOnHowTheTranscriptWasProducedStraightThrough() {
+        // Readers are told which of the three produced the text: the uploader's own captions,
+        // YouTube's speech recognition, or ours. They fail in noticeably different ways.
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
+        when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
+
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
+
+        assertThat(result.source()).isEqualTo(TranscriptSource.MANUAL_CAPTIONS);
     }
 
     @Test
@@ -91,7 +108,7 @@ class TranscriptionServiceTest {
         // detects the language itself, and that's what must end up in the final result.
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", List.of()));
+                .thenReturn(new SourceResolution(video, "en", List.of(), TranscriptSource.SPEECH_TO_TEXT));
 
         List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hola a todos"));
         when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("es", transcribed));
@@ -110,7 +127,7 @@ class TranscriptionServiceTest {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Ola"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "pt-BR", captionSegments));
+                .thenReturn(new SourceResolution(video, "pt-BR", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "pt", "es")).thenReturn(List.of());
 
         TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
@@ -123,7 +140,7 @@ class TranscriptionServiceTest {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", captionSegments));
+                .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
         transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
@@ -138,7 +155,7 @@ class TranscriptionServiceTest {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", captionSegments));
+                .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
         service.process("https://youtu.be/abc123", "es", "session-1");
@@ -155,7 +172,7 @@ class TranscriptionServiceTest {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", captionSegments));
+                .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
         service.process("https://youtu.be/abc123", "es", "session-1");
@@ -168,7 +185,7 @@ class TranscriptionServiceTest {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", captionSegments));
+                .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
         List<ProcessingStage> reported = new ArrayList<>();
@@ -182,7 +199,7 @@ class TranscriptionServiceTest {
     void reportsATranscribingStageWhenFallingBackToSpeechToText() {
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, null, List.of()));
+                .thenReturn(new SourceResolution(video, null, List.of(), TranscriptSource.SPEECH_TO_TEXT));
         List<TranscriptSegment> transcribed = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
         when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("en", transcribed));
         when(translationService.translate(transcribed, "en", "es")).thenReturn(List.of());
@@ -201,7 +218,7 @@ class TranscriptionServiceTest {
         TranscriptionService service = newService(tightLimits);
         VideoMetadata video = new VideoMetadata("abc123", "A five minute video", 300);
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
-                .thenReturn(new SourceResolution(video, "en", List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"))));
+                .thenReturn(new SourceResolution(video, "en", List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody")), TranscriptSource.MANUAL_CAPTIONS));
 
         assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1"))
                 .isInstanceOf(RateLimitedException.class);
