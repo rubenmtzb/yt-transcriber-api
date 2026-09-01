@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: yt-transcriber-api
+
+server:
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  processing:
+    max-video-duration-seconds: ${MAX_VIDEO_DURATION_SECONDS:1200}
+    max-requests-per-hour: ${MAX_REQUESTS_PER_HOUR:3}
+    max-audio-minutes-per-hour: ${MAX_AUDIO_MINUTES_PER_HOUR:60}
+    max-concurrent-transcriptions: ${MAX_CONCURRENT_TRANSCRIPTIONS:2}
+  ytdlp:
+    binary-path: ${YTDLP_BINARY_PATH:yt-dlp}
+    timeout-seconds: ${YTDLP_TIMEOUT_SECONDS:45}
+  whisper:
+    binary-path: ${WHISPER_BINARY_PATH:whisper-cli}
+    model-path: ${WHISPER_MODEL_PATH:}
+    timeout-seconds: ${WHISPER_TIMEOUT_SECONDS:900}
+    min-audio-duration-seconds: ${WHISPER_MIN_AUDIO_DURATION_SECONDS:15}
+  deepl:
+    api-key: ${TRANSLATION_API_KEY:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4321}
