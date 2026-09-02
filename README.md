@@ -155,10 +155,13 @@ Copy `.env.example` to `.env` and fill in the values you need locally.
 |--------------------------------------|---------------|--------------------------------------------------------------|
 | `TRANSLATION_API_KEY`                | (empty)       | DeepL API key. Without it, translation fails with `PROVIDER_UNAVAILABLE` |
 | `MAX_VIDEO_DURATION_SECONDS`         | 1200          | Longest video accepted (20 minutes)                          |
-| `MAX_REQUESTS_PER_HOUR`              | 3             | Processings per session per hour                             |
+| `MAX_REQUESTS_PER_HOUR`              | 3             | Processings per session per hour. Shown in the UI, but not a boundary — a session id comes from the caller |
 | `MAX_AUDIO_MINUTES_PER_HOUR`         | 60            | Audio-minutes budget per session per hour                    |
+| `MAX_REQUESTS_PER_HOUR_PER_IP`       | 12            | Processings per client address per hour. **This is the limit that actually holds.** Looser than the per-session one because an address is shared by everyone behind one router |
+| `MAX_AUDIO_MINUTES_PER_HOUR_PER_IP`  | 240           | Audio-minutes budget per client address per hour             |
 | `MAX_CONCURRENT_TRANSCRIPTIONS`      | 2             | Global cap on transcriptions processed at once               |
-| `CORS_ALLOWED_ORIGINS`               | `http://localhost:4321` | Comma-separated frontend origins allowed to call the API |
+| `CORS_ALLOWED_ORIGINS`               | `http://localhost:4321` | Comma-separated frontend origins allowed to call the API. **Leaving this empty makes every browser request fail with `Invalid CORS request` while curl keeps working** — the startup log says so at ERROR |
+| `ACTUATOR_ENDPOINTS`                 | `health`      | Actuator endpoints to publish. Only `health` in production: `metrics` and `prometheus` are unauthenticated and hand out heap, GC, disk and per-endpoint latencies to anyone |
 | `YTDLP_BINARY_PATH`                  | `yt-dlp`      | Path to the yt-dlp executable                                |
 | `YTDLP_TIMEOUT_SECONDS`              | 45            | Timeout for each yt-dlp subprocess call                      |
 | `WHISPER_BINARY_PATH`                | `whisper-cli` | Path to the whisper.cpp CLI executable                       |
@@ -166,7 +169,15 @@ Copy `.env.example` to `.env` and fill in the values you need locally.
 | `WHISPER_TIMEOUT_SECONDS`            | 900           | Timeout for audio extraction + whisper-cli combined          |
 | `WHISPER_MIN_AUDIO_DURATION_SECONDS` | 15            | Videos shorter than this skip Speech-to-Text (language auto-detection is unreliable on very short clips) |
 
-Actuator exposure: `health`, `info`, `metrics`, `prometheus` — see `application.yml`.
+### Rate limiting
+
+Two buckets are charged per request. The **per-session** one is what a person sees in the UI: the
+session id is an anonymous identifier the browser sends back, so it maps neatly onto "what have I
+used". It cannot bound anything, because the caller chooses it — a new id buys a new budget. The
+**per-address** one is the real ceiling, resolved by `ClientIpFilter` from `CF-Connecting-IP` (set by
+Cloudflare, which fronts the deployment, and overwritten there so a caller cannot forge it), falling
+back to `X-Forwarded-For` and then the socket address. `GET /api/v1/transcriptions/usage` reports
+whichever of the two is closer to refusing.
 
 ### Local requirements
 
@@ -201,7 +212,12 @@ Frontend: [yt-transcriber-web](https://github.com/rubenmtzb/yt-transcriber-web)
 
 ## Live Demo
 
-Not deployed yet.
+Pre-production API: <https://yt-transcriber-api-pre.onrender.com> (Render, built from this repo's
+`Dockerfile`). Secrets and limits are set as environment variables in the Render dashboard — the
+table above is the full list, and `CORS_ALLOWED_ORIGINS` must name the frontend's origin or no
+browser can reach the API.
+
+Frontend: <https://transcribe.rubenitx.me>
 
 ## License
 

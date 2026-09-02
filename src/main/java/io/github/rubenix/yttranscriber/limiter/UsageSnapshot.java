@@ -17,4 +17,26 @@ public record UsageSnapshot(
         long maxAudioMinutesPerHour,
         Long audioMinutesResetInSeconds,
         long maxVideoDurationSeconds) {
+
+    /**
+     * The stricter reading of the two buckets a caller is charged against, so the panel never
+     * promises an allowance the other bucket would refuse.
+     *
+     * <p>Merged per budget rather than per field: the three request fields have to agree with each
+     * other (a remaining, its maximum, and when the next slot frees up describe one window), and
+     * mixing halves of two windows would produce a countdown that belongs to neither. Requests and
+     * audio minutes are independent, so they are chosen separately.
+     */
+    public static UsageSnapshot tighterOf(UsageSnapshot first, UsageSnapshot second) {
+        UsageSnapshot byRequests = first.requestsRemaining() <= second.requestsRemaining() ? first : second;
+        UsageSnapshot byAudio = first.audioMinutesRemaining() <= second.audioMinutesRemaining() ? first : second;
+        return new UsageSnapshot(
+                byRequests.requestsRemaining(),
+                byRequests.maxRequestsPerHour(),
+                byRequests.requestsResetInSeconds(),
+                byAudio.audioMinutesRemaining(),
+                byAudio.maxAudioMinutesPerHour(),
+                byAudio.audioMinutesResetInSeconds(),
+                first.maxVideoDurationSeconds());
+    }
 }

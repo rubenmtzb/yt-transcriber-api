@@ -17,7 +17,7 @@ class CapacityGuardTest {
 
     @Test
     void rejectsWorkOnceTheConcurrencyLimitIsReachedThenAllowsItAfterReleasing() throws Exception {
-        CapacityGuard guard = new CapacityGuard(new ProcessingLimitsProperties(1200, 100, 6000, 1));
+        CapacityGuard guard = new CapacityGuard(new ProcessingLimitsProperties(1200, 100, 6000, 1, 1_000_000, 1_000_000));
         CountDownLatch firstCallStarted = new CountDownLatch(1);
         CountDownLatch releaseFirstCall = new CountDownLatch(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -43,7 +43,7 @@ class CapacityGuardTest {
 
     @Test
     void releasesThePermitEvenWhenTheWorkThrows() {
-        CapacityGuard guard = new CapacityGuard(new ProcessingLimitsProperties(1200, 100, 6000, 1));
+        CapacityGuard guard = new CapacityGuard(new ProcessingLimitsProperties(1200, 100, 6000, 1, 1_000_000, 1_000_000));
 
         assertThatThrownBy(() -> guard.runWithinCapacity(() -> {
             throw new IllegalStateException("boom");

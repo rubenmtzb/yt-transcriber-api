@@ -37,6 +37,19 @@ public class YtDlpSourceProvider implements SourceProvider {
 
     private static final Logger log = LoggerFactory.getLogger(YtDlpSourceProvider.class);
     private static final Set<String> SUPPORTED_AVAILABILITY = Set.of("public", "unlisted");
+    // Both flags are needed, and they cover different URL shapes -- confirmed against real yt-dlp:
+    //   --no-playlist    "watch?v=X&list=Y" resolves to X. That is the URL YouTube's own share button
+    //                    hands you while watching inside a playlist, so it is the common case, not an
+    //                    edge one. Without this yt-dlp walks the whole list and --print emits one JSON
+    //                    object per video, which then reaches a parser expecting exactly one.
+    //   --playlist-items pure playlist/channel URLs ("/playlist?list=", "/@channel/videos") name no
+    //                    single video for --no-playlist to pick, so they would still be enumerated in
+    //                    full -- one request pinning a capacity permit for the whole timeout. This caps
+    //                    the walk at the first entry. --no-playlist takes precedence where both apply,
+    //                    so case 2 above still resolves to X rather than the list's first video.
+    private static final String SINGLE_VIDEO_FLAG = "--no-playlist";
+    private static final String ITEM_CAP_FLAG = "--playlist-items";
+    private static final String ITEM_CAP_VALUE = "1";
     private static final String AUTO_ORIGINAL_SUFFIX = "-orig";
     // Heuristic, not a full BCP-47 parser: matches "es", "pt-BR", "zh-Hans", "es-419" (region can
     // be a UN M49 numeric code). Rejects legacy community-contribution keys like
@@ -78,6 +91,7 @@ public class YtDlpSourceProvider implements SourceProvider {
         List<String> command = List.of(
                 properties.binaryPath(),
                 "--skip-download",
+                SINGLE_VIDEO_FLAG, ITEM_CAP_FLAG, ITEM_CAP_VALUE,
                 "--print", "%(.{id,title,duration,availability,is_live,language,subtitles,automatic_captions})j",
                 youtubeUrl);
 
@@ -196,6 +210,7 @@ public class YtDlpSourceProvider implements SourceProvider {
         List<String> command = List.of(
                 properties.binaryPath(),
                 "--skip-download",
+                SINGLE_VIDEO_FLAG, ITEM_CAP_FLAG, ITEM_CAP_VALUE,
                 track.manual() ? "--write-subs" : "--write-auto-subs",
                 "--sub-langs", track.language(),
                 "--sub-format", "json3",

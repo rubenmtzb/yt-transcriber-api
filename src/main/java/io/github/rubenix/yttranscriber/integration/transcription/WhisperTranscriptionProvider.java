@@ -80,6 +80,9 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
     private Path extractAudio(String youtubeUrl, String videoId, Path tempDir) {
         List<String> command = List.of(
                 ytDlpProperties.binaryPath(),
+                // Same reasoning as YtDlpSourceProvider's own calls: without these, a playlist or
+                // channel URL makes yt-dlp download audio for every entry it finds.
+                "--no-playlist", "--playlist-items", "1",
                 "--extract-audio",
                 "--audio-format", "wav",
                 "--postprocessor-args", "ffmpeg:-ar 16000 -ac 1",

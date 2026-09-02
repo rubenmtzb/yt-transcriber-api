@@ -12,7 +12,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        # Anything beyond health is unauthenticated reconnaissance once this is public: metrics and
+        # prometheus hand out heap, GC, disk, per-endpoint latencies and request counts to anyone
+        # who asks. Override locally (or bind management to its own unpublished port) when the
+        # numbers are actually wanted.
+        include: ${ACTUATOR_ENDPOINTS:health}
   endpoint:
     health:
       show-details: never
@@ -23,6 +27,11 @@ app:
     max-requests-per-hour: ${MAX_REQUESTS_PER_HOUR:3}
     max-audio-minutes-per-hour: ${MAX_AUDIO_MINUTES_PER_HOUR:60}
     max-concurrent-transcriptions: ${MAX_CONCURRENT_TRANSCRIPTIONS:2}
+    # Looser than the per-session numbers on purpose: an address is shared by everyone behind one
+    # router, so this must not lock out a household or an office, while still being the ceiling a
+    # single abuser cannot step over by inventing new session ids.
+    max-requests-per-hour-per-ip: ${MAX_REQUESTS_PER_HOUR_PER_IP:12}
+    max-audio-minutes-per-hour-per-ip: ${MAX_AUDIO_MINUTES_PER_HOUR_PER_IP:240}
   ytdlp:
     binary-path: ${YTDLP_BINARY_PATH:yt-dlp}
     timeout-seconds: ${YTDLP_TIMEOUT_SECONDS:45}

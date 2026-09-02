@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
 
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, false),
+    NOT_FOUND(HttpStatus.NOT_FOUND, false),
     UNSUPPORTED_SOURCE(HttpStatus.UNPROCESSABLE_CONTENT, false),
     VIDEO_TOO_LONG(HttpStatus.CONTENT_TOO_LARGE, false),
     RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, true),

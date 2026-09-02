@@ -19,7 +19,7 @@ class UsageLimiterTest {
 
     @Test
     void allowsRequestsUpToTheConfiguredHourlyLimitThenRejects() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 2, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 2, 60, 2, 1_000_000, 1_000_000), clock);
 
         assertThatCode(() -> limiter.checkAndRecordRequest("session-a")).doesNotThrowAnyException();
         assertThatCode(() -> limiter.checkAndRecordRequest("session-a")).doesNotThrowAnyException();
@@ -29,7 +29,7 @@ class UsageLimiterTest {
 
     @Test
     void tracksRequestBudgetsIndependentlyPerSession() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 1, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 1, 60, 2, 1_000_000, 1_000_000), clock);
 
         limiter.checkAndRecordRequest("session-a");
 
@@ -38,7 +38,7 @@ class UsageLimiterTest {
 
     @Test
     void resetsTheRequestBudgetAfterTheWindowElapses() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 1, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 1, 60, 2, 1_000_000, 1_000_000), clock);
 
         limiter.checkAndRecordRequest("session-a");
         assertThatThrownBy(() -> limiter.checkAndRecordRequest("session-a")).isInstanceOf(RateLimitedException.class);
@@ -50,7 +50,7 @@ class UsageLimiterTest {
 
     @Test
     void allowsAudioMinutesUpToTheConfiguredHourlyLimitThenRejects() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 100, 10, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 100, 10, 2, 1_000_000, 1_000_000), clock);
 
         assertThatCode(() -> limiter.checkAndRecordAudioMinutes("session-a", 300)).doesNotThrowAnyException();
         assertThatCode(() -> limiter.checkAndRecordAudioMinutes("session-a", 300)).doesNotThrowAnyException();
@@ -60,7 +60,7 @@ class UsageLimiterTest {
 
     @Test
     void roundsPartialMinutesUpWhenCheckingTheAudioBudget() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 100, 1, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 100, 1, 2, 1_000_000, 1_000_000), clock);
 
         assertThatThrownBy(() -> limiter.checkAndRecordAudioMinutes("session-a", 61))
                 .isInstanceOf(RateLimitedException.class);
@@ -68,7 +68,7 @@ class UsageLimiterTest {
 
     @Test
     void resetsAudioMinutesBudgetAfterTheWindowElapses() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 100, 5, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 100, 5, 2, 1_000_000, 1_000_000), clock);
 
         limiter.checkAndRecordAudioMinutes("session-a", 300);
         assertThatThrownBy(() -> limiter.checkAndRecordAudioMinutes("session-a", 60))
@@ -81,7 +81,7 @@ class UsageLimiterTest {
 
         @Test
     void reportsAFullBudgetForASessionThatHasNeverBeenSeen() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2, 1_000_000, 1_000_000), clock);
 
         UsageSnapshot snapshot = limiter.remaining("unknown-session");
 
@@ -95,7 +95,7 @@ class UsageLimiterTest {
 
     @Test
     void countsDownToTheMomentTheOldestUseLeavesTheWindow() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2, 1_000_000, 1_000_000), clock);
         limiter.checkAndRecordRequest("s1");
         limiter.checkAndRecordAudioMinutes("s1", 120);
 
@@ -111,7 +111,7 @@ class UsageLimiterTest {
 
     @Test
     void tracksTheOldestSurvivingUseAsEarlierOnesExpire() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 3, 60, 2, 1_000_000, 1_000_000), clock);
         limiter.checkAndRecordRequest("s1");
         clock.advance(Duration.ofMinutes(30));
         limiter.checkAndRecordRequest("s1");
@@ -128,7 +128,7 @@ class UsageLimiterTest {
     void doesNotRegisterASessionJustForAskingWhatItHasLeft() {
         // The frontend polls this on every page load; recording those would grow the map for
         // visitors who never transcribe anything.
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 1, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 1, 60, 2, 1_000_000, 1_000_000), clock);
 
         limiter.remaining("curious");
         limiter.remaining("curious");
@@ -140,7 +140,7 @@ class UsageLimiterTest {
     void dropsSessionsWhoseWindowsHaveFullyExpired() {
         // Anonymous ids are minted per browser and mostly never come back, so without this sweep
         // the map gains an entry per distinct caller and never releases one.
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2, 1_000_000, 1_000_000), clock);
 
         limiter.checkAndRecordRequest("session-a");
         limiter.checkAndRecordAudioMinutes("session-b", 120);
@@ -155,7 +155,7 @@ class UsageLimiterTest {
 
     @Test
     void keepsSessionsStillInsideTheirWindowWhenSweeping() {
-        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2), clock);
+        UsageLimiter limiter = new UsageLimiter(new ProcessingLimitsProperties(1200, 5, 60, 2, 1_000_000, 1_000_000), clock);
 
         limiter.checkAndRecordRequest("session-a");
 

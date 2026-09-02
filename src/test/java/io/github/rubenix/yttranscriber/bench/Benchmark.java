@@ -39,7 +39,7 @@ public final class Benchmark {
     }
 
     private static void limiterCost() {
-        var limits = new ProcessingLimitsProperties(1200, 1_000_000, 1_000_000, 2);
+        var limits = new ProcessingLimitsProperties(1200, 1_000_000, 1_000_000, 2, 1_000_000, 1_000_000);
         for (int sessions : new int[] {1_000, 10_000, 100_000}) {
             UsageLimiter limiter = new UsageLimiter(limits, Clock.systemUTC());
             for (int i = 0; i < sessions; i++) {

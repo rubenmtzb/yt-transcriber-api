@@ -33,12 +33,19 @@ class TranscriptionControllerTest {
     @MockitoBean
     private TranscriptionService transcriptionService;
 
-    @MockitoBean
-    private UsageLimiter usageLimiter;
+    // Two beans now, distinguished by name: the controller merges a per-session and a per-address
+    // budget, so a single mock could not stand in for both.
+    @MockitoBean(name = "sessionUsageLimiter")
+    private UsageLimiter sessionUsageLimiter;
+
+    @MockitoBean(name = "ipUsageLimiter")
+    private UsageLimiter ipUsageLimiter;
 
     @Test
     void reportsTheSessionsRemainingBudget() throws Exception {
-        when(usageLimiter.remaining(anyString())).thenReturn(new UsageSnapshot(2, 3, 1800L, 45, 60, 1800L, 1200));
+        when(sessionUsageLimiter.remaining(anyString())).thenReturn(new UsageSnapshot(2, 3, 1800L, 45, 60, 1800L, 1200));
+        // Deliberately roomier, so what comes back proves the endpoint reports the tighter of the two.
+        when(ipUsageLimiter.remaining(anyString())).thenReturn(new UsageSnapshot(11, 12, 900L, 220, 240, 900L, 1200));
 
         mockMvc.perform(get("/api/v1/transcriptions/usage"))
                 .andExpect(status().isOk())
@@ -53,7 +60,7 @@ class TranscriptionControllerTest {
     void returnsTheTranscriptionForAValidRequest() throws Exception {
         VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
         List<TranslatedSegment> segments = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
-        when(transcriptionService.process(anyString(), anyString(), anyString()))
+        when(transcriptionService.process(anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(new TranscriptionResult(video, "en", "es", TranscriptSource.MANUAL_CAPTIONS, segments));
 
         mockMvc.perform(post("/api/v1/transcriptions")
@@ -93,7 +100,7 @@ class TranscriptionControllerTest {
     @Test
     void acceptsRealWorldYoutubeUrlShapesThatArentJustWatchVEqualsFirst() throws Exception {
         VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
-        when(transcriptionService.process(anyString(), anyString(), anyString()))
+        when(transcriptionService.process(anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(new TranscriptionResult(video, "en", "es", TranscriptSource.MANUAL_CAPTIONS, List.of()));
 
         // playlist link where "v" isn't the first query param, m.youtube.com, and Shorts
@@ -110,7 +117,7 @@ class TranscriptionControllerTest {
 
     @Test
     void mapsProviderUnavailableToServiceUnavailable() throws Exception {
-        when(transcriptionService.process(anyString(), anyString(), anyString()))
+        when(transcriptionService.process(anyString(), anyString(), anyString(), anyString()))
                 .thenThrow(new ProviderUnavailableException("No source provider is configured yet."));
 
         mockMvc.perform(post("/api/v1/transcriptions")

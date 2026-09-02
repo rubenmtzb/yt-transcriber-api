@@ -2,7 +2,6 @@ package io.github.rubenix.yttranscriber.limiter;
 
 import io.github.rubenix.yttranscriber.config.ProcessingLimitsProperties;
 import io.github.rubenix.yttranscriber.exception.RateLimitedException;
-import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -14,15 +13,18 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
- * Tracks per-session usage against the hourly request and audio-minute budgets configured in
- * {@link ProcessingLimitsProperties}. Sessions are anonymous header-carried identities (see
- * {@link SessionIdFilter}), not IP addresses — a deliberate V1 scope decision, since this
- * runs as a single local instance without a reverse proxy in front of it yet.
+ * Tracks usage for one identity against the hourly request and audio-minute budgets configured in
+ * {@link ProcessingLimitsProperties}. What the identity <em>is</em> is the caller's business: there
+ * are two instances of this (see {@code UsageLimiterConfig}), one keyed on the anonymous session id
+ * from {@link SessionIdFilter} and one keyed on the client address from
+ * {@link ClientIpFilter}. Only the second bounds anything -- a session id is chosen by the caller,
+ * so a fresh one buys a fresh budget -- but both are charged, because the session budget is what
+ * gives a person an honest read on their own remaining allowance.
  *
- * <p>Usage is kept in memory per session as a rolling one-hour window; entries older than an hour
- * are evicted lazily on each check, and sessions whose windows have emptied out entirely are
+ * <p>Usage is kept in memory per identity as a rolling one-hour window; entries older than an hour
+ * are evicted lazily on each check, and identities whose windows have emptied out entirely are
  * dropped from the map by a throttled sweep — without that, the map would gain an entry per
- * distinct session id and never give one back, which for anonymous ids (a fresh one per browser
+ * distinct identity and never give one back, which for anonymous ids (a fresh one per browser
  * that never sends one back) grows without bound for as long as the process lives.
  *
  * <p>Every read-modify-write runs inside {@link ConcurrentHashMap#compute} rather than under a
@@ -31,7 +33,6 @@ import java.util.function.Function;
  * therefore cannot be swept away in the window between another thread reading it and recording
  * into it, which would silently hand that caller a fresh budget.
  */
-@Component
 public class UsageLimiter {
 
     private static final Duration WINDOW = Duration.ofHours(1);

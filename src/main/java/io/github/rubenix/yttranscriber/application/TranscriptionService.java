@@ -10,6 +10,7 @@ import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
 import io.github.rubenix.yttranscriber.exception.VideoTooLongException;
 import io.github.rubenix.yttranscriber.limiter.CapacityGuard;
 import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -29,7 +30,8 @@ public class TranscriptionService {
     private final SentenceGrouper sentenceGrouper;
     private final TranslationService translationService;
     private final ProcessingLimitsProperties limits;
-    private final UsageLimiter usageLimiter;
+    private final UsageLimiter sessionUsageLimiter;
+    private final UsageLimiter ipUsageLimiter;
     private final CapacityGuard capacityGuard;
 
     public TranscriptionService(SourceResolutionService sourceResolutionService,
@@ -37,19 +39,21 @@ public class TranscriptionService {
                                  SentenceGrouper sentenceGrouper,
                                  TranslationService translationService,
                                  ProcessingLimitsProperties limits,
-                                 UsageLimiter usageLimiter,
+                                 @Qualifier("sessionUsageLimiter") UsageLimiter sessionUsageLimiter,
+                                 @Qualifier("ipUsageLimiter") UsageLimiter ipUsageLimiter,
                                  CapacityGuard capacityGuard) {
         this.sourceResolutionService = sourceResolutionService;
         this.transcriptionProvider = transcriptionProvider;
         this.sentenceGrouper = sentenceGrouper;
         this.translationService = translationService;
         this.limits = limits;
-        this.usageLimiter = usageLimiter;
+        this.sessionUsageLimiter = sessionUsageLimiter;
+        this.ipUsageLimiter = ipUsageLimiter;
         this.capacityGuard = capacityGuard;
     }
 
-    public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId) {
-        return process(youtubeUrl, targetLanguage, sessionId, ProgressListener.NOOP);
+    public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId, String clientIp) {
+        return process(youtubeUrl, targetLanguage, sessionId, clientIp, ProgressListener.NOOP);
     }
 
     /**
@@ -58,18 +62,29 @@ public class TranscriptionService {
      * (request-shape validation happens at the controller boundary) -- the caller emits it itself
      * the moment the stream opens.
      */
-    public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId, ProgressListener progress) {
+    public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId, String clientIp,
+                                        ProgressListener progress) {
         return capacityGuard.runWithinCapacity(() -> {
             // Charged only once a capacity permit is actually held. Charging before would spend one
             // of the caller's hourly requests on a "server busy" rejection that did no work at all
             // -- and since RATE_LIMITED is flagged retryable, the UI invites exactly the retries
             // that would burn the rest of the budget on the server's own congestion.
-            usageLimiter.checkAndRecordRequest(sessionId);
+            // Session bucket first, address bucket second. Either order catches a caller cycling
+            // through invented session ids -- their fresh id sails through the first check and the
+            // address check is still waiting behind it -- so the order is decided by who pays for a
+            // refusal instead. Each bucket records as it checks, so whichever runs first has already
+            // charged the caller by the time the second one refuses. Refusals by the session budget
+            // are the common ones (three an hour against twelve), and this way they cost only the
+            // person who spent them, rather than draining the allowance shared with everyone else
+            // behind the same router.
+            sessionUsageLimiter.checkAndRecordRequest(sessionId);
+            ipUsageLimiter.checkAndRecordRequest(clientIp);
 
             progress.onStage(ProcessingStage.RESOLVING_VIDEO);
             SourceResolution resolution = sourceResolutionService.resolve(youtubeUrl);
             requireWithinDurationLimit(resolution.video().durationSeconds());
-            usageLimiter.checkAndRecordAudioMinutes(sessionId, resolution.video().durationSeconds());
+            sessionUsageLimiter.checkAndRecordAudioMinutes(sessionId, resolution.video().durationSeconds());
+            ipUsageLimiter.checkAndRecordAudioMinutes(clientIp, resolution.video().durationSeconds());
 
             String sourceLanguage;
             List<TranscriptSegment> segments;

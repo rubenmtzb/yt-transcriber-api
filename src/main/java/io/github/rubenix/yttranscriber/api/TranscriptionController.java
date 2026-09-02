@@ -9,6 +9,7 @@ import io.github.rubenix.yttranscriber.config.RequestIdFilter;
 import io.github.rubenix.yttranscriber.exception.ApplicationException;
 import io.github.rubenix.yttranscriber.exception.ErrorCode;
 import io.github.rubenix.yttranscriber.exception.ErrorResponse;
+import io.github.rubenix.yttranscriber.limiter.ClientIpFilter;
 import io.github.rubenix.yttranscriber.limiter.SessionIdFilter;
 import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
 import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
@@ -18,6 +19,7 @@ import jakarta.validation.constraints.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
@@ -39,27 +41,36 @@ public class TranscriptionController {
     private static final Logger log = LoggerFactory.getLogger(TranscriptionController.class);
 
     private final TranscriptionService transcriptionService;
-    private final UsageLimiter usageLimiter;
+    private final UsageLimiter sessionUsageLimiter;
+    private final UsageLimiter ipUsageLimiter;
 
-    public TranscriptionController(TranscriptionService transcriptionService, UsageLimiter usageLimiter) {
+    public TranscriptionController(TranscriptionService transcriptionService,
+                                    @Qualifier("sessionUsageLimiter") UsageLimiter sessionUsageLimiter,
+                                    @Qualifier("ipUsageLimiter") UsageLimiter ipUsageLimiter) {
         this.transcriptionService = transcriptionService;
-        this.usageLimiter = usageLimiter;
+        this.sessionUsageLimiter = sessionUsageLimiter;
+        this.ipUsageLimiter = ipUsageLimiter;
     }
 
     /**
      * What the caller has left of its hourly budget. Polled by the frontend so the limit can be
      * shown before a request is spent instead of only surfacing as a refusal afterwards.
+     *
+     * <p>Reports whichever of the two buckets is closer to refusing, so the figure shown is one the
+     * next request would actually get rather than the friendlier of two answers.
      */
     @GetMapping("/usage")
-    public UsageSnapshot usage(@RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId) {
-        return usageLimiter.remaining(sessionId);
+    public UsageSnapshot usage(@RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId,
+                                @RequestAttribute(ClientIpFilter.REQUEST_ATTRIBUTE) String clientIp) {
+        return UsageSnapshot.tighterOf(sessionUsageLimiter.remaining(sessionId), ipUsageLimiter.remaining(clientIp));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.OK)
     public TranscriptionResponseDto create(@Valid @RequestBody TranscriptionRequestDto request,
-                                            @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId) {
-        var result = transcriptionService.process(request.youtubeUrl(), request.targetLanguage(), sessionId);
+                                            @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId,
+                                            @RequestAttribute(ClientIpFilter.REQUEST_ATTRIBUTE) String clientIp) {
+        var result = transcriptionService.process(request.youtubeUrl(), request.targetLanguage(), sessionId, clientIp);
         return TranscriptionResponseDto.from(result);
     }
 
@@ -79,24 +90,32 @@ public class TranscriptionController {
     public SseEmitter stream(
             @RequestParam @NotBlank @Pattern(regexp = TranscriptionRequestDto.YOUTUBE_URL_PATTERN) String youtubeUrl,
             @RequestParam @NotBlank @Pattern(regexp = TranscriptionRequestDto.TARGET_LANGUAGE_PATTERN) String targetLanguage,
-            @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId) {
+            @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId,
+            @RequestAttribute(ClientIpFilter.REQUEST_ATTRIBUTE) String clientIp) {
         SseEmitter emitter = new SseEmitter(0L);
         TranscriptionStreamChannel channel = new TranscriptionStreamChannel(emitter);
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
 
-        Thread.ofVirtual().start(() -> runStream(channel, youtubeUrl, targetLanguage, sessionId, requestId));
+        Thread.ofVirtual().start(() -> runStream(channel, youtubeUrl, targetLanguage, sessionId, clientIp, requestId));
 
         return emitter;
     }
 
     private void runStream(TranscriptionStreamChannel channel, String youtubeUrl, String targetLanguage,
-                            String sessionId, String requestId) {
+                            String sessionId, String clientIp, String requestId) {
+        // The filters that populate the MDC put their values on the request thread and clear them in
+        // their own finally block; a virtual thread inherits none of it either way. Without this,
+        // every line logged for the rest of the run -- the ones worth having when a stream fails --
+        // prints an empty requestId and sessionId.
+        MDC.put(RequestIdFilter.MDC_KEY, requestId);
+        MDC.put(SessionIdFilter.MDC_KEY, sessionId);
+        MDC.put(ClientIpFilter.MDC_KEY, clientIp);
         try {
             channel.sendSession(sessionId);
             channel.sendStage(ProcessingStage.VALIDATING_URL);
 
             TranscriptionResult result = transcriptionService.process(
-                    youtubeUrl, targetLanguage, sessionId, channel::sendStage);
+                    youtubeUrl, targetLanguage, sessionId, clientIp, channel::sendStage);
 
             channel.sendResult(TranscriptionResponseDto.from(result));
         } catch (TranscriptionStreamChannel.StreamAborted e) {
@@ -109,6 +128,7 @@ public class TranscriptionController {
             channel.sendError(ErrorResponse.of(ErrorCode.INTERNAL_ERROR, "An unexpected error occurred.", requestId));
         } finally {
             channel.complete();
+            MDC.clear();
         }
     }
 }
