@@ -3,6 +3,9 @@ spring:
     name: yt-transcriber-api
 
 server:
+  # Render (and most container hosts) assign the port at runtime and expect the process to bind to
+  # whatever they put in PORT; the default keeps a plain local run on 8080 as before.
+  port: ${PORT:8080}
   forward-headers-strategy: framework
 
 management:
