@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -36,6 +37,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleApplication(ApplicationException ex) {
         log.warn("Business rule violation: code={}, message={}", ex.errorCode(), ex.getMessage());
         return respond(ex.errorCode(), ex.getMessage());
+    }
+
+    /**
+     * An unknown path is the caller's mistake, not ours. Without this it fell through to the
+     * catch-all below, which answered 500 and logged a full stack trace at ERROR -- so every bot,
+     * scanner and uptime pinger that touched "/" produced ~45 lines of noise in the deployment log
+     * and told the monitoring the service was broken when it was perfectly healthy.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex) {
+        log.debug("No handler for {}", ex.getResourcePath());
+        return respond(ErrorCode.NOT_FOUND, "No such endpoint.");
     }
 
     @ExceptionHandler(Exception.class)
