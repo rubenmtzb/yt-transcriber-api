@@ -43,9 +43,9 @@ class TranscriptionStreamTest {
 
     @Test
     void streamsRealProgressStagesThenTheResult() {
-        when(transcriptionService.process(eq("https://youtu.be/abc123"), eq("es"), any(), any()))
+        when(transcriptionService.process(eq("https://youtu.be/abc123"), eq("es"), any(), any(), any()))
                 .thenAnswer(invocation -> {
-                    ProgressListener listener = invocation.getArgument(3);
+                    ProgressListener listener = invocation.getArgument(4);
                     listener.onStage(ProcessingStage.RESOLVING_VIDEO);
                     listener.onStage(ProcessingStage.TRANSLATING);
                     listener.onStage(ProcessingStage.PREPARING_RESULT);
@@ -70,7 +70,7 @@ class TranscriptionStreamTest {
 
     @Test
     void streamsAnErrorEventWhenTheServiceThrowsAnApplicationException() {
-        when(transcriptionService.process(eq("https://youtu.be/abc123"), eq("es"), any(), any()))
+        when(transcriptionService.process(eq("https://youtu.be/abc123"), eq("es"), any(), any(), any()))
                 .thenThrow(new ProviderUnavailableException("boom"));
 
         String body = get("https://youtu.be/abc123", "es");

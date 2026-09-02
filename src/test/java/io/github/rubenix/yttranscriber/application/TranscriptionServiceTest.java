@@ -35,7 +35,11 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TranscriptionServiceTest {
 
-    private static final ProcessingLimitsProperties LIMITS = new ProcessingLimitsProperties(1200, 3, 60, 2);
+    // A fixed address for the tests that are about the per-session bucket: the per-IP budgets in
+    // LIMITS are set high enough never to bind, so sharing one address across them changes nothing.
+    private static final String CLIENT_IP = "203.0.113.7";
+
+    private static final ProcessingLimitsProperties LIMITS = new ProcessingLimitsProperties(1200, 3, 60, 2, 1_000_000, 1_000_000);
 
     @Mock
     private SourceResolutionService sourceResolutionService;
@@ -56,7 +60,8 @@ class TranscriptionServiceTest {
     private TranscriptionService newService(ProcessingLimitsProperties limits) {
         return new TranscriptionService(
                 sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService,
-                limits, new UsageLimiter(limits, Clock.systemUTC()), new CapacityGuard(limits));
+                limits, new UsageLimiter(limits, Clock.systemUTC()),
+                new UsageLimiter(limits.asPerIpBudget(), Clock.systemUTC()), new CapacityGuard(limits));
     }
 
     @Test
@@ -65,7 +70,7 @@ class TranscriptionServiceTest {
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
                 .thenReturn(new SourceResolution(video, "en", List.of(), TranscriptSource.SPEECH_TO_TEXT));
 
-        assertThatThrownBy(() -> transcriptionService.process("https://youtu.be/abc123", "es", "session-1"))
+        assertThatThrownBy(() -> transcriptionService.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP))
                 .isInstanceOf(VideoTooLongException.class);
     }
 
@@ -81,7 +86,7 @@ class TranscriptionServiceTest {
         List<TranslatedSegment> translated = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
         when(translationService.translate(transcribed, "en", "es")).thenReturn(translated);
 
-        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
 
         assertThat(result.video()).isEqualTo(video);
         assertThat(result.segments()).isEqualTo(translated);
@@ -98,7 +103,7 @@ class TranscriptionServiceTest {
                 .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
-        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
 
         assertThat(result.source()).isEqualTo(TranscriptSource.MANUAL_CAPTIONS);
     }
@@ -116,7 +121,7 @@ class TranscriptionServiceTest {
         when(transcriptionProvider.transcribe(any())).thenReturn(new TranscriptionOutcome("es", transcribed));
         when(translationService.translate(transcribed, "es", "en")).thenReturn(List.of());
 
-        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "en", "session-1");
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "en", "session-1", CLIENT_IP);
 
         assertThat(result.sourceLanguage()).isEqualTo("es");
     }
@@ -132,7 +137,7 @@ class TranscriptionServiceTest {
                 .thenReturn(new SourceResolution(video, "pt-BR", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "pt", "es")).thenReturn(List.of());
 
-        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
+        TranscriptionResult result = transcriptionService.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
 
         assertThat(result.sourceLanguage()).isEqualTo("pt");
     }
@@ -145,14 +150,14 @@ class TranscriptionServiceTest {
                 .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
-        transcriptionService.process("https://youtu.be/abc123", "es", "session-1");
+        transcriptionService.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
 
         verify(transcriptionProvider, never()).transcribe(any());
     }
 
     @Test
     void rejectsOnceTheSessionsRequestBudgetIsExhausted() {
-        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 1, 60, 2);
+        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 1, 60, 2, 1_000_000, 1_000_000);
         TranscriptionService service = newService(tightLimits);
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
@@ -160,16 +165,16 @@ class TranscriptionServiceTest {
                 .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
-        service.process("https://youtu.be/abc123", "es", "session-1");
+        service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
 
-        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1"))
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP))
                 .isInstanceOf(RateLimitedException.class);
         verify(sourceResolutionService, times(1)).resolve("https://youtu.be/abc123");
     }
 
     @Test
     void doesNotCountAgainstAnotherSessionsRequestBudget() {
-        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 1, 60, 2);
+        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 1, 60, 2, 1_000_000, 1_000_000);
         TranscriptionService service = newService(tightLimits);
         VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
         List<TranscriptSegment> captionSegments = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
@@ -177,9 +182,9 @@ class TranscriptionServiceTest {
                 .thenReturn(new SourceResolution(video, "en", captionSegments, TranscriptSource.MANUAL_CAPTIONS));
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
-        service.process("https://youtu.be/abc123", "es", "session-1");
+        service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
 
-        assertThat(service.process("https://youtu.be/abc123", "es", "session-2")).isNotNull();
+        assertThat(service.process("https://youtu.be/abc123", "es", "session-2", CLIENT_IP)).isNotNull();
     }
 
     @Test
@@ -191,7 +196,7 @@ class TranscriptionServiceTest {
         when(translationService.translate(captionSegments, "en", "es")).thenReturn(List.of());
 
         List<ProcessingStage> reported = new ArrayList<>();
-        transcriptionService.process("https://youtu.be/abc123", "es", "session-1", reported::add);
+        transcriptionService.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP, reported::add);
 
         assertThat(reported).containsExactly(
                 ProcessingStage.RESOLVING_VIDEO, ProcessingStage.TRANSLATING, ProcessingStage.PREPARING_RESULT);
@@ -207,7 +212,7 @@ class TranscriptionServiceTest {
         when(translationService.translate(transcribed, "en", "es")).thenReturn(List.of());
 
         List<ProcessingStage> reported = new ArrayList<>();
-        transcriptionService.process("https://youtu.be/abc123", "es", "session-1", reported::add);
+        transcriptionService.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP, reported::add);
 
         assertThat(reported).containsExactly(
                 ProcessingStage.RESOLVING_VIDEO, ProcessingStage.TRANSCRIBING,
@@ -219,12 +224,12 @@ class TranscriptionServiceTest {
         // Being turned away because the server is busy is the server's problem, not the caller's:
         // it must not cost one of their few hourly requests, or a couple of retries on a busy
         // server would lock them out for an hour without ever having transcribed anything.
-        ProcessingLimitsProperties oneAtATime = new ProcessingLimitsProperties(1200, 1, 60, 1);
+        ProcessingLimitsProperties oneAtATime = new ProcessingLimitsProperties(1200, 1, 60, 1, 1_000_000, 1_000_000);
         UsageLimiter usageLimiter = new UsageLimiter(oneAtATime, Clock.systemUTC());
         CapacityGuard capacityGuard = new CapacityGuard(oneAtATime);
         TranscriptionService service = new TranscriptionService(
                 sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService,
-                oneAtATime, usageLimiter, capacityGuard);
+                oneAtATime, usageLimiter, new UsageLimiter(oneAtATime, Clock.systemUTC()), capacityGuard);
 
         CountDownLatch permitHeld = new CountDownLatch(1);
         CountDownLatch releasePermit = new CountDownLatch(1);
@@ -235,7 +240,7 @@ class TranscriptionServiceTest {
         }));
         permitHeld.await();
 
-        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1"))
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP))
                 .isInstanceOf(RateLimitedException.class);
 
         releasePermit.countDown();
@@ -255,13 +260,57 @@ class TranscriptionServiceTest {
 
     @Test
     void rejectsOnceTheSessionsAudioMinutesBudgetIsExhausted() {
-        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 100, 4, 2);
+        ProcessingLimitsProperties tightLimits = new ProcessingLimitsProperties(1200, 100, 4, 2, 1_000_000, 1_000_000);
         TranscriptionService service = newService(tightLimits);
         VideoMetadata video = new VideoMetadata("abc123", "A five minute video", 300);
         when(sourceResolutionService.resolve("https://youtu.be/abc123"))
                 .thenReturn(new SourceResolution(video, "en", List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody")), TranscriptSource.MANUAL_CAPTIONS));
 
-        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1"))
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP))
                 .isInstanceOf(RateLimitedException.class);
+    }
+
+    @Test
+    void doesNotHandOutAFreshBudgetToACallerCyclingSessionIds() {
+        // The whole reason the per-address bucket exists. A session id is whatever the caller put in
+        // a header, so before this the third line below succeeded and the limit was decorative.
+        ProcessingLimitsProperties limits = new ProcessingLimitsProperties(1200, 1, 60, 2, 2, 1_000_000);
+        TranscriptionService service = new TranscriptionService(
+                sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService,
+                limits, new UsageLimiter(limits, Clock.systemUTC()),
+                new UsageLimiter(limits.asPerIpBudget(), Clock.systemUTC()), new CapacityGuard(limits));
+
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        List<TranscriptSegment> captions = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", captions, TranscriptSource.MANUAL_CAPTIONS));
+        when(translationService.translate(captions, "en", "es")).thenReturn(List.of());
+
+        service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
+        service.process("https://youtu.be/abc123", "es", "session-2", CLIENT_IP);
+
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-3", CLIENT_IP))
+                .isInstanceOf(RateLimitedException.class);
+    }
+
+    @Test
+    void keepsAddressBudgetsSeparateSoOneAbuserDoesNotLockOutEveryoneElse() {
+        ProcessingLimitsProperties limits = new ProcessingLimitsProperties(1200, 1, 60, 2, 1, 1_000_000);
+        TranscriptionService service = new TranscriptionService(
+                sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService,
+                limits, new UsageLimiter(limits, Clock.systemUTC()),
+                new UsageLimiter(limits.asPerIpBudget(), Clock.systemUTC()), new CapacityGuard(limits));
+
+        VideoMetadata video = new VideoMetadata("abc123", "Title", 300);
+        List<TranscriptSegment> captions = List.of(new TranscriptSegment(0, 0, 4200, "Hello everybody"));
+        when(sourceResolutionService.resolve("https://youtu.be/abc123"))
+                .thenReturn(new SourceResolution(video, "en", captions, TranscriptSource.MANUAL_CAPTIONS));
+        when(translationService.translate(captions, "en", "es")).thenReturn(List.of());
+
+        service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP);
+        assertThatThrownBy(() -> service.process("https://youtu.be/abc123", "es", "session-2", CLIENT_IP))
+                .isInstanceOf(RateLimitedException.class);
+
+        assertThat(service.process("https://youtu.be/abc123", "es", "session-3", "198.51.100.9")).isNotNull();
     }
 }
