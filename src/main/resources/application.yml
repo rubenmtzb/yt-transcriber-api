@@ -12,7 +12,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        # Anything beyond health is unauthenticated reconnaissance once this is public: metrics and
+        # prometheus hand out heap, GC, disk, per-endpoint latencies and request counts to anyone
+        # who asks. Override locally (or bind management to its own unpublished port) when the
+        # numbers are actually wanted.
+        include: ${ACTUATOR_ENDPOINTS:health}
   endpoint:
     health:
       show-details: never
