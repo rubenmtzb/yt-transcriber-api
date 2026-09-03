@@ -16,6 +16,8 @@
         <appender-ref ref="CONSOLE"/>
     </root>
 
-    <logger name="io.github.rubenix.yttranscriber" level="INFO"/>
+    <!-- Raise to DEBUG through APP_LOG_LEVEL to see yt-dlp's raw output while diagnosing a
+         resolution failure, without a code change. -->
+    <logger name="io.github.rubenix.yttranscriber" level="${APP_LOG_LEVEL:-INFO}"/>
 
 </configuration>
