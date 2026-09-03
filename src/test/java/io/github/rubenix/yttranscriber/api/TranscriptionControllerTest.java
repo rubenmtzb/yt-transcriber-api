@@ -1,0 +1,132 @@
+package io.github.rubenix.yttranscriber.api;
+
+import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSource;
+import io.github.rubenix.yttranscriber.application.TranscriptionResult;
+import io.github.rubenix.yttranscriber.application.TranscriptionService;
+import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
+import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
+import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
+import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
+import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(TranscriptionController.class)
+class TranscriptionControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private TranscriptionService transcriptionService;
+
+    // Two beans now, distinguished by name: the controller merges a per-session and a per-address
+    // budget, so a single mock could not stand in for both.
+    @MockitoBean(name = "sessionUsageLimiter")
+    private UsageLimiter sessionUsageLimiter;
+
+    @MockitoBean(name = "ipUsageLimiter")
+    private UsageLimiter ipUsageLimiter;
+
+    @Test
+    void reportsTheSessionsRemainingBudget() throws Exception {
+        when(sessionUsageLimiter.remaining(anyString())).thenReturn(new UsageSnapshot(2, 3, 1800L, 45, 60, 1800L, 1200));
+        // Deliberately roomier, so what comes back proves the endpoint reports the tighter of the two.
+        when(ipUsageLimiter.remaining(anyString())).thenReturn(new UsageSnapshot(11, 12, 900L, 220, 240, 900L, 1200));
+
+        mockMvc.perform(get("/api/v1/transcriptions/usage"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requestsRemaining").value(2))
+                .andExpect(jsonPath("$.maxRequestsPerHour").value(3))
+                .andExpect(jsonPath("$.audioMinutesRemaining").value(45))
+                .andExpect(jsonPath("$.requestsResetInSeconds").value(1800))
+                .andExpect(jsonPath("$.maxVideoDurationSeconds").value(1200));
+    }
+
+    @Test
+    void returnsTheTranscriptionForAValidRequest() throws Exception {
+        VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
+        List<TranslatedSegment> segments = List.of(new TranslatedSegment(0, 0, 4200, "Hello everybody", "Hola a todos"));
+        when(transcriptionService.process(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(new TranscriptionResult(video, "en", "es", TranscriptSource.MANUAL_CAPTIONS, segments));
+
+        mockMvc.perform(post("/api/v1/transcriptions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"youtubeUrl":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","targetLanguage":"es"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.video.id").value("dQw4w9WgXcQ"))
+                .andExpect(jsonPath("$.targetLanguage").value("es"))
+                .andExpect(jsonPath("$.segments[0].translatedText").value("Hola a todos"));
+    }
+
+    @Test
+    void rejectsABlankYoutubeUrlWithAnInvalidRequestEnvelope() throws Exception {
+        mockMvc.perform(post("/api/v1/transcriptions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"youtubeUrl":"","targetLanguage":"es"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.retryable").value(false));
+    }
+
+    @Test
+    void rejectsAMalformedYoutubeUrl() throws Exception {
+        mockMvc.perform(post("/api/v1/transcriptions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"youtubeUrl":"https://not-youtube.com/watch?v=abc","targetLanguage":"es"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void acceptsRealWorldYoutubeUrlShapesThatArentJustWatchVEqualsFirst() throws Exception {
+        VideoMetadata video = new VideoMetadata("dQw4w9WgXcQ", "Sample video", 300);
+        when(transcriptionService.process(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(new TranscriptionResult(video, "en", "es", TranscriptSource.MANUAL_CAPTIONS, List.of()));
+
+        // playlist link where "v" isn't the first query param, m.youtube.com, and Shorts
+        for (String url : List.of(
+                "https://www.youtube.com/watch?list=PLxyz&v=dQw4w9WgXcQ",
+                "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+                "https://www.youtube.com/shorts/dQw4w9WgXcQ")) {
+            mockMvc.perform(post("/api/v1/transcriptions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"youtubeUrl\":\"%s\",\"targetLanguage\":\"es\"}".formatted(url)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Test
+    void mapsProviderUnavailableToServiceUnavailable() throws Exception {
+        when(transcriptionService.process(anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new ProviderUnavailableException("No source provider is configured yet."));
+
+        mockMvc.perform(post("/api/v1/transcriptions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"youtubeUrl":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","targetLanguage":"es"}
+                                """))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("PROVIDER_UNAVAILABLE"))
+                .andExpect(jsonPath("$.retryable").value(true));
+    }
+}
