@@ -13,6 +13,8 @@ import io.github.rubenix.yttranscriber.integration.youtube.YtDlpSourceProvider.C
 import io.github.rubenix.yttranscriber.integration.youtube.YtDlpSourceProvider.RawVideoInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -78,11 +80,32 @@ class YtDlpSourceProviderTest {
                 .isInstanceOf(UnsupportedSourceException.class);
     }
 
+    /**
+     * yt-dlp leaves {@code availability} null on several extraction paths, and it does so
+     * consistently when YouTube serves a reduced response to a datacenter IP. Demanding an explicit
+     * "public" there rejected every single video on the deployed service while the same URL worked
+     * from a home connection, so an unknown availability has to mean "carry on", not "refuse".
+     * A genuinely private video never gets this far: extraction itself fails first.
+     */
     @Test
-    void rejectsANullAvailabilityWithoutThrowingNullPointerException() {
+    void processesAVideoWhoseAvailabilityYtDlpDidNotReport() {
         stub("""
                 {"id": "abc", "title": "Odd video", "duration": 100, "availability": null, "is_live": false}
                 """, 0);
+
+        SourceResolution resolution = sourceProvider.resolve(
+                new SourceRequest("https://www.youtube.com/watch?v=abc"));
+
+        assertThat(resolution.video().id()).isEqualTo("abc");
+        assertThat(resolution.video().durationSeconds()).isEqualTo(100);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"private", "premium_only", "subscriber_only", "needs_auth"})
+    void refusesEveryAvailabilityYouTubeReportsAsRestricted(String availability) {
+        stub("""
+                {"id": "abc", "title": "Restricted", "duration": 100, "availability": "%s", "is_live": false}
+                """.formatted(availability), 0);
 
         assertThatThrownBy(() -> sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=abc")))
                 .isInstanceOf(UnsupportedSourceException.class);
