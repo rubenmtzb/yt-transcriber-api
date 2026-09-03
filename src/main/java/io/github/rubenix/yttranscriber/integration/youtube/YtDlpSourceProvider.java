@@ -36,7 +36,14 @@ import java.util.stream.Stream;
 public class YtDlpSourceProvider implements SourceProvider {
 
     private static final Logger log = LoggerFactory.getLogger(YtDlpSourceProvider.class);
-    private static final Set<String> SUPPORTED_AVAILABILITY = Set.of("public", "unlisted");
+    // Restricted states yt-dlp reports for videos we genuinely cannot transcribe. This is a deny
+    // list rather than an allow list on purpose: yt-dlp leaves `availability` null on several
+    // extraction paths (it does so consistently when YouTube serves a reduced response to a
+    // datacenter IP, which is exactly where this runs), and demanding "public" there rejected every
+    // video on the deployed service while working locally. A genuinely private video fails earlier,
+    // at extraction, so treating "unknown" as allowed does not open one up.
+    private static final Set<String> RESTRICTED_AVAILABILITY =
+            Set.of("private", "premium_only", "subscriber_only", "needs_auth");
     // Both flags are needed, and they cover different URL shapes -- confirmed against real yt-dlp:
     //   --no-playlist    "watch?v=X&list=Y" resolves to X. That is the URL YouTube's own share button
     //                    hands you while watching inside a playlist, so it is the common case, not an
@@ -98,9 +105,12 @@ public class YtDlpSourceProvider implements SourceProvider {
         var result = processRunner.run(command, Duration.ofSeconds(properties.timeoutSeconds()));
 
         if (result.exitCode() != 0) {
+            log.warn("yt-dlp could not resolve {}: exit={}, stderr={}",
+                    youtubeUrl, result.exitCode(), result.stderr());
             throw new UnsupportedSourceException("The video could not be resolved: " + youtubeUrl);
         }
 
+        log.debug("yt-dlp resolved {}: {}", youtubeUrl, result.stdout());
         return parse(result.stdout());
     }
 
@@ -108,7 +118,8 @@ public class YtDlpSourceProvider implements SourceProvider {
         if (info.isLive()) {
             throw new UnsupportedSourceException("Live streams are not supported.");
         }
-        if (info.availability() == null || !SUPPORTED_AVAILABILITY.contains(info.availability())) {
+        if (info.availability() != null && RESTRICTED_AVAILABILITY.contains(info.availability())) {
+            log.info("Refusing {}: availability={}", info.id(), info.availability());
             throw new UnsupportedSourceException("This video is not publicly accessible.");
         }
         if (info.duration() == null) {
