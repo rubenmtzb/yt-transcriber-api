@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="0%" r="80%">
+      <stop offset="0%" stop-color="#2e1a63" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#05060e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#b14aed"/><stop offset="100%" stop-color="#5b2a86"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="300" fill="#05060e"/>
+  <rect width="1200" height="300" fill="url(#glow)"/>
+  <circle cx="76" cy="56" r="5" fill="#3fbf7f"/>
+  <text x="92" y="61" fill="#3fbf7f" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="2.5">LIVE</text>
+  <text x="146" y="61" fill="#2e1a63" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="2">//</text>
+  <text x="174" y="61" fill="#9a94b8" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1.5">yt-api.rubenitx.me</text>
+  <text x="70" y="132" fill="#f4f2fa" font-size="44" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="800">YT Transcriber API</text>
+  <text x="70" y="172" fill="#9a94b8" font-size="16" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">Transcribes and translates YouTube videos. Uploader captions when they exist,</text>
+  <text x="70" y="196" fill="#6f6a8c" font-size="15" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">local speech-to-text when they do not. No account, no database.</text>
+  <rect x="70" y="232" width="76" height="26" rx="13" fill="#0d1030" stroke="#2e1a63"/>
+  <text x="83" y="250" fill="#9a94b8" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="0.5">Java 25</text>
+  <rect x="155" y="232" width="120" height="26" rx="13" fill="#0d1030" stroke="#2e1a63"/>
+  <text x="168.4" y="250" fill="#9a94b8" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="0.5">Spring Boot 4</text>
+  <rect x="284" y="232" width="69" height="26" rx="13" fill="#0d1030" stroke="#2e1a63"/>
+  <text x="297.0" y="250" fill="#9a94b8" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="0.5">yt-dlp</text>
+  <rect x="362" y="232" width="105" height="26" rx="13" fill="#0d1030" stroke="#2e1a63"/>
+  <text x="375.2" y="250" fill="#9a94b8" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="0.5">whisper.cpp</text>
+  <rect x="476" y="232" width="62" height="26" rx="13" fill="#0d1030" stroke="#2e1a63"/>
+  <text x="489.4" y="250" fill="#9a94b8" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="0.5">DeepL</text>
+  <rect x="547" y="232" width="69" height="26" rx="13" fill="#0d1030" stroke="#2e1a63"/>
+  <text x="560.4" y="250" fill="#9a94b8" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="0.5">Docker</text>
+  <text x="830" y="62" fill="#2e1a63" font-size="11" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1">00:00</text>
+  <rect x="880" y="53" width="150" height="6" rx="3" fill="#12163a"/>
+  <text x="830" y="96" fill="#2e1a63" font-size="11" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1">00:05</text>
+  <rect x="880" y="87" width="120" height="6" rx="3" fill="#12163a"/>
+  <text x="830" y="130" fill="#2e1a63" font-size="11" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1">00:12</text>
+  <rect x="880" y="121" width="170" height="6" rx="3" fill="#12163a"/>
+</svg>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430" width="1200" height="430">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="0%" r="80%">
+      <stop offset="0%" stop-color="#2e1a63" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#05060e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#b14aed"/><stop offset="100%" stop-color="#5b2a86"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="430" fill="#05060e"/>
+  <rect width="1200" height="430" fill="url(#glow)"/>
+  <text x="70" y="60" fill="#b14aed" font-size="13" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="2.5">02 // DEPLOYMENT</text>
+  <text x="70" y="98" fill="#f4f2fa" font-size="26" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="700">Where each piece runs, and why it matters</text>
+  <line x1="70" y1="120" x2="1130" y2="120" stroke="#2e1a63" stroke-width="1"/>
+  <rect x="70" y="175" width="230" height="62" rx="9" fill="#12163a" stroke="#2e1a63" stroke-width="1"/>
+  <circle cx="94" cy="206.0" r="4" fill="#42d6e0"/>
+  <text x="110" y="211.0" fill="#f4f2fa" font-size="14" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1.5">BROWSER</text>
+  <text x="70" y="258" fill="#6f6a8c" font-size="12" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">Astro · React · SSE</text>
+  <rect x="390" y="175" width="230" height="62" rx="9" fill="#12163a" stroke="#2e1a63" stroke-width="1"/>
+  <circle cx="414" cy="206.0" r="4" fill="#b14aed"/>
+  <text x="430" y="211.0" fill="#f4f2fa" font-size="14" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1.5">CLOUDFLARE</text>
+  <text x="390" y="258" fill="#6f6a8c" font-size="12" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">Pages · DNS · Tunnel</text>
+  <rect x="710" y="175" width="230" height="62" rx="9" fill="#12163a" stroke="url(#accent)" stroke-width="1.5"/>
+  <circle cx="734" cy="206.0" r="4" fill="#3fbf7f"/>
+  <text x="750" y="211.0" fill="#f4f2fa" font-size="14" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1.5">HOME SERVER</text>
+  <text x="710" y="258" fill="#6f6a8c" font-size="12" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">Docker · residential IP</text>
+  <line x1="306" y1="206" x2="377" y2="206" stroke="#5b2a86" stroke-width="1.5"/>
+  <path d="M 384 206 L 376 201.5 L 376 210.5 Z" fill="#5b2a86"/>
+  <line x1="626" y1="206" x2="697" y2="206" stroke="#5b2a86" stroke-width="1.5"/>
+  <path d="M 704 206 L 696 201.5 L 696 210.5 Z" fill="#5b2a86"/>
+  <line x1="946" y1="206" x2="983" y2="206" stroke="#3d2a6b" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <path d="M 990 206 L 982 201.5 L 982 210.5 Z" fill="#3d2a6b"/>
+  <text x="1000" y="199" fill="#9a94b8" font-size="13" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="1.5">YOUTUBE</text>
+  <text x="1000" y="219" fill="#6f6a8c" font-size="11" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">no bot check</text>
+  <rect x="70" y="310" width="1060" height="88" rx="10" fill="#0d1030" stroke="#2e1a63"/>
+  <text x="94" y="344" fill="#b14aed" font-size="12" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-weight="400" letter-spacing="2">WHY IT RUNS AT HOME</text>
+  <text x="94" y="372" fill="#9a94b8" font-size="13" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">YouTube answers datacenter address ranges with a bot check that yt-dlp cannot get past on any retry. A residential</text>
+  <text x="94" y="390" fill="#9a94b8" font-size="13" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif" font-weight="400">connection never sees it. Where the API runs decides whether it works at all — that is a requirement, not a preference.</text>
+</svg>
