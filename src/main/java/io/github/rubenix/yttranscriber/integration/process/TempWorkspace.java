@@ -33,7 +33,7 @@ public final class TempWorkspace implements AutoCloseable {
         try {
             return new TempWorkspace(Files.createTempDirectory(prefix));
         } catch (IOException e) {
-            throw new ProviderUnavailableException(failureMessage);
+            throw new ProviderUnavailableException(failureMessage, e);
         }
     }
 

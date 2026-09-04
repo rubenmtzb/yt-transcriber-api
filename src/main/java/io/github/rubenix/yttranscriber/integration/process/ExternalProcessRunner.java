@@ -47,7 +47,7 @@ public class ExternalProcessRunner {
         try {
             return new ProcessBuilder(command).start();
         } catch (IOException e) {
-            throw new ProviderUnavailableException("Could not start process: " + command.getFirst());
+            throw new ProviderUnavailableException("Could not start process: " + command.getFirst(), e);
         }
     }
 

@@ -175,7 +175,7 @@ public class YtDlpSourceProvider implements SourceProvider {
         try {
             return objectMapper.readValue(stdout.trim(), RawVideoInfo.class);
         } catch (Exception e) {
-            throw new ProviderUnavailableException("Could not parse yt-dlp metadata output.");
+            throw new ProviderUnavailableException("Could not parse yt-dlp metadata output.", e);
         }
     }
 
@@ -267,7 +267,7 @@ public class YtDlpSourceProvider implements SourceProvider {
         try {
             document = objectMapper.readValue(Files.readString(subtitleFile), Json3Document.class);
         } catch (Exception e) {
-            throw new ProviderUnavailableException("Could not parse the downloaded subtitle file.");
+            throw new ProviderUnavailableException("Could not parse the downloaded subtitle file.", e);
         }
 
         List<Json3Event> events = document.events() != null ? document.events() : List.of();

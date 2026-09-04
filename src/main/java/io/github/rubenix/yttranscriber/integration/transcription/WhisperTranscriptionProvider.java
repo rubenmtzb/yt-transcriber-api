@@ -122,7 +122,7 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
         try {
             return objectMapper.readValue(Files.readString(outputFile), WhisperOutput.class);
         } catch (Exception e) {
-            throw new ProviderUnavailableException("Could not parse the transcription engine's output.");
+            throw new ProviderUnavailableException("Could not parse the transcription engine's output.", e);
         }
     }
 

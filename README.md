@@ -212,12 +212,25 @@ Frontend: [yt-transcriber-web](https://github.com/rubenmtzb/yt-transcriber-web)
 
 ## Live Demo
 
-Pre-production API: <https://yt-transcriber-api-pre.onrender.com> (Render, built from this repo's
-`Dockerfile`). Secrets and limits are set as environment variables in the Render dashboard — the
-table above is the full list, and `CORS_ALLOWED_ORIGINS` must name the frontend's origin or no
-browser can reach the API.
+API: <https://yt-api.rubenitx.me> — frontend: <https://yt.rubenitx.me>
 
-Frontend: <https://transcribe.rubenitx.me>
+The API runs in Docker on a home server, published only on loopback and reached through a
+Cloudflare Tunnel; the frontend is a static build on Cloudflare Pages. That split is not an
+aesthetic choice. YouTube answers requests from datacenter address ranges with a bot check that
+`yt-dlp` cannot get past on any retry, so the same image that transcribes everything locally
+resolves nothing at all on a hosting provider. A residential connection never sees that check.
+
+Two consequences worth knowing before deploying this anywhere:
+
+- **Where it runs decides whether it works**, so the usual "push and it deploys" does not apply to
+  the API. Moving it back to a cloud host reintroduces the bot check.
+- **Fronting it with Cloudflare is what makes the address-based rate limit real.** The limiter
+  trusts `CF-Connecting-IP` (see `ClientIpFilter`), which only holds because Cloudflare rejects
+  requests that arrive carrying that header already set. Exposed directly, that header is
+  forgeable and the per-address budget stops bounding anything.
+
+Configuration is environment variables — the table above is the full list, and
+`CORS_ALLOWED_ORIGINS` must name the frontend's origin or no browser can reach the API.
 
 ## License
 

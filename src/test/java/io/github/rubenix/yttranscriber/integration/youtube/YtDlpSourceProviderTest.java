@@ -61,6 +61,19 @@ class YtDlpSourceProviderTest {
     }
 
     @Test
+    void keepsWhatBrokeWhenYtDlpOutputCannotBeParsed() {
+        // The message on this exception reaches the caller, so it says nothing specific on
+        // purpose. That leaves the cause as the only record of why the parse failed, and this
+        // pins it: an adapter that swallows it is how a malformed response, a truncated one and
+        // a schema change all become the same unreadable line in the log.
+        stub("not json at all", 0);
+
+        assertThatThrownBy(() -> sourceProvider.resolve(new SourceRequest("https://www.youtube.com/watch?v=abc")))
+                .isInstanceOf(ProviderUnavailableException.class)
+                .hasCauseInstanceOf(Exception.class);
+    }
+
+    @Test
     void rejectsLiveStreams() {
         stub("""
                 {"id": "abc", "title": "Live now", "duration": null, "availability": "public", "is_live": true}
