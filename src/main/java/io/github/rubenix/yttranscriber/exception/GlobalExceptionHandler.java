@@ -33,9 +33,19 @@ public class GlobalExceptionHandler {
         return respond(ErrorCode.INVALID_REQUEST, "The request payload is invalid.");
     }
 
+    /**
+     * A rate limit or an over-long video is an ordinary refusal and its message says everything
+     * worth knowing, so those log a single line. An exception carrying a cause is a different
+     * animal -- something below actually broke, and the vague message the caller receives is not
+     * enough to diagnose it -- so that one takes the stack trace with it.
+     */
     @ExceptionHandler(ApplicationException.class)
     public ResponseEntity<ErrorResponse> handleApplication(ApplicationException ex) {
-        log.warn("Business rule violation: code={}, message={}", ex.errorCode(), ex.getMessage());
+        if (ex.getCause() != null) {
+            log.warn("Business rule violation: code={}, message={}", ex.errorCode(), ex.getMessage(), ex);
+        } else {
+            log.warn("Business rule violation: code={}, message={}", ex.errorCode(), ex.getMessage());
+        }
         return respond(ex.errorCode(), ex.getMessage());
     }
 
