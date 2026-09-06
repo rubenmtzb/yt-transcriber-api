@@ -51,4 +51,22 @@ class DotenvEnvironmentPostProcessorTest {
 
         assertThat(values).containsEntry("KEY", "value with spaces");
     }
+
+    @Test
+    void stripsTheQuotesAShellWouldHaveStripped() {
+        Map<String, Object> values = DotenvEnvironmentPostProcessor.parse(
+                List.of("DOUBLE=\"quoted\"", "SINGLE='quoted'"));
+
+        assertThat(values).containsEntry("DOUBLE", "quoted").containsEntry("SINGLE", "quoted");
+    }
+
+    @Test
+    void leavesQuotesThatAreActuallyPartOfTheValue() {
+        // Only a matching surrounding pair is syntax. An apostrophe inside a value, or a lone
+        // leading quote, is a character someone meant to write.
+        Map<String, Object> values = DotenvEnvironmentPostProcessor.parse(
+                List.of("MESSAGE=it's fine", "UNBALANCED=\"half"));
+
+        assertThat(values).containsEntry("MESSAGE", "it's fine").containsEntry("UNBALANCED", "\"half");
+    }
 }

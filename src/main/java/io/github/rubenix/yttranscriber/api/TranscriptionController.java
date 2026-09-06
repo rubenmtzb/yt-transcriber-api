@@ -16,6 +16,7 @@ import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -88,7 +89,8 @@ public class TranscriptionController {
      */
     @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(
-            @RequestParam @NotBlank @Pattern(regexp = TranscriptionRequestDto.YOUTUBE_URL_PATTERN) String youtubeUrl,
+            @RequestParam @NotBlank @Size(max = TranscriptionRequestDto.MAX_URL_LENGTH)
+            @Pattern(regexp = TranscriptionRequestDto.YOUTUBE_URL_PATTERN) String youtubeUrl,
             @RequestParam @NotBlank @Pattern(regexp = TranscriptionRequestDto.TARGET_LANGUAGE_PATTERN) String targetLanguage,
             @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId,
             @RequestAttribute(ClientIpFilter.REQUEST_ATTRIBUTE) String clientIp) {
@@ -121,7 +123,17 @@ public class TranscriptionController {
         } catch (TranscriptionStreamChannel.StreamAborted e) {
             log.info("Client disconnected; abandoning the in-flight transcription for session {}", sessionId);
         } catch (ApplicationException e) {
-            log.warn("Business rule violation during streaming: code={}, message={}", e.errorCode(), e.getMessage());
+            // Same split as GlobalExceptionHandler, for the same reason: an ordinary refusal says
+            // everything in its message, while one carrying a cause means something below actually
+            // broke and the vague message the caller receives is not enough to diagnose it. This is
+            // the path the frontend actually uses, so it is where losing the cause cost the most.
+            if (e.getCause() != null) {
+                log.warn("Business rule violation during streaming: code={}, message={}",
+                        e.errorCode(), e.getMessage(), e);
+            } else {
+                log.warn("Business rule violation during streaming: code={}, message={}",
+                        e.errorCode(), e.getMessage());
+            }
             channel.sendError(ErrorResponse.of(e.errorCode(), e.getMessage(), requestId));
         } catch (Exception e) {
             log.error("Unhandled exception during streaming", e);

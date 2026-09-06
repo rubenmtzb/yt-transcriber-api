@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -265,7 +266,12 @@ public class YtDlpSourceProvider implements SourceProvider {
     private List<TranscriptSegment> parseSegments(Path subtitleFile) {
         Json3Document document;
         try {
-            document = objectMapper.readValue(Files.readString(subtitleFile), Json3Document.class);
+            // Straight from the file rather than through Files.readString: the intermediate String
+            // is a second, UTF-16 copy of a subtitle track that runs to megabytes on a long video,
+            // and it buys nothing -- Jackson decodes the bytes itself.
+            try (InputStream json = Files.newInputStream(subtitleFile)) {
+                document = objectMapper.readValue(json, Json3Document.class);
+            }
         } catch (Exception e) {
             throw new ProviderUnavailableException("Could not parse the downloaded subtitle file.", e);
         }

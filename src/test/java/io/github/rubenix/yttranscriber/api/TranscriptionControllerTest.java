@@ -1,5 +1,6 @@
 package io.github.rubenix.yttranscriber.api;
 
+import io.github.rubenix.yttranscriber.api.dto.TranscriptionRequestDto;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSource;
 import io.github.rubenix.yttranscriber.application.TranscriptionResult;
 import io.github.rubenix.yttranscriber.application.TranscriptionService;
@@ -18,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -84,6 +86,22 @@ class TranscriptionControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.retryable").value(false));
+    }
+
+    @Test
+    void rejectsAUrlLongerThanAnyRealYouTubeLink() throws Exception {
+        // The pattern anchors the scheme and host but ends in an unbounded ".+", so a link that is
+        // otherwise perfectly shaped can carry a megabyte of padding -- which would be handed to
+        // yt-dlp as a process argument and written to a log line before anything looked at it.
+        String padded = "https://www.youtube.com/watch?v=" + "a".repeat(TranscriptionRequestDto.MAX_URL_LENGTH);
+
+        mockMvc.perform(post("/api/v1/transcriptions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"youtubeUrl\":\"%s\",\"targetLanguage\":\"es\"}".formatted(padded)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
+        verifyNoInteractions(transcriptionService);
     }
 
     @Test

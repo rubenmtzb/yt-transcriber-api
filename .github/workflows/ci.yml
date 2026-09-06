@@ -1,5 +1,10 @@
 name: CI
 
+# Nothing here writes to the repository, and the default token is granted write scopes it would
+# hand to any workflow step -- including a compromised dependency's build plugin.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

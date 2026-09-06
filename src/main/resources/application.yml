@@ -22,6 +22,10 @@ management:
       show-details: never
 
 app:
+  # Filtered in by Maven at package time (spring-boot-starter-parent configures the @...@
+  # delimiters for this file). Without it the service root answered "dev" forever, which is worse
+  # than no version at all: it is a field that looks like an answer and never changes.
+  version: @project.version@
   processing:
     max-video-duration-seconds: ${MAX_VIDEO_DURATION_SECONDS:1200}
     max-requests-per-hour: ${MAX_REQUESTS_PER_HOUR:3}
