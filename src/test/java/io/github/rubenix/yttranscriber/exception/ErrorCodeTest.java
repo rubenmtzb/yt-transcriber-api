@@ -19,6 +19,7 @@ class ErrorCodeTest {
     void onlyTransientFailuresAreMarkedRetryable() {
         assertThat(ErrorCode.RATE_LIMITED.retryable()).isTrue();
         assertThat(ErrorCode.PROVIDER_UNAVAILABLE.retryable()).isTrue();
+        assertThat(ErrorCode.PROCESSING_TIMEOUT.retryable()).isTrue();
 
         assertThat(ErrorCode.INVALID_REQUEST.retryable()).isFalse();
         assertThat(ErrorCode.UNSUPPORTED_SOURCE.retryable()).isFalse();
@@ -34,6 +35,7 @@ class ErrorCodeTest {
         assertThat(ErrorCode.VIDEO_TOO_LONG.httpStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE);
         assertThat(ErrorCode.RATE_LIMITED.httpStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(ErrorCode.PROVIDER_UNAVAILABLE.httpStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(ErrorCode.PROCESSING_TIMEOUT.httpStatus()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
         assertThat(ErrorCode.TRANSLATION_QUOTA_EXCEEDED.httpStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(ErrorCode.INTERNAL_ERROR.httpStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }

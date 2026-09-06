@@ -9,6 +9,7 @@ import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionOutcome
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptionProvider;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
 import io.github.rubenix.yttranscriber.exception.RateLimitedException;
+import io.github.rubenix.yttranscriber.exception.ProcessingTimeoutException;
 import io.github.rubenix.yttranscriber.exception.VideoTooLongException;
 import io.github.rubenix.yttranscriber.limiter.CapacityGuard;
 import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
@@ -19,9 +20,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -62,6 +65,31 @@ class TranscriptionServiceTest {
                 sourceResolutionService, transcriptionProvider, new SentenceGrouper(), translationService,
                 limits, new UsageLimiter(limits, Clock.systemUTC()),
                 new UsageLimiter(limits.asPerIpBudget(), Clock.systemUTC()), new CapacityGuard(limits));
+    }
+
+    @Test
+    void expiryStopsThePipelineAndReleasesCapacityForTheNextRequest() {
+        var limits = new ProcessingLimitsProperties(1200, 3, 60, 1, 100, 100);
+        var service = newService(limits);
+        var time = new AtomicLong();
+        var resolution = new SourceResolution(new VideoMetadata("abc123", "Title", 30), "en",
+                List.of(new TranscriptSegment(0, 0, 1000, "Hi")), TranscriptSource.MANUAL_CAPTIONS);
+        when(sourceResolutionService.resolve("https://youtu.be/abc123")).thenAnswer(invocation -> {
+            time.set(Duration.ofSeconds(2).toNanos());
+            return resolution;
+        });
+        List<ProcessingStage> stages = new ArrayList<>();
+
+        assertThatThrownBy(() -> new ProcessingBudget(Duration.ofSeconds(1), time::get).run(() ->
+                service.process("https://youtu.be/abc123", "es", "session-1", CLIENT_IP, stages::add)))
+                .isInstanceOf(ProcessingTimeoutException.class);
+        assertThat(stages).containsExactly(ProcessingStage.RESOLVING_VIDEO);
+        verify(translationService, never()).translate(any(), any(), any());
+        verify(transcriptionProvider, never()).transcribe(any());
+
+        when(translationService.translate(any(), any(), any())).thenReturn(List.of());
+        assertThatCode(() -> service.process("https://youtu.be/abc123", "es", "session-2", CLIENT_IP))
+                .doesNotThrowAnyException();
     }
 
     @Test

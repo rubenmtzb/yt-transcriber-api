@@ -1,6 +1,7 @@
 package io.github.rubenix.yttranscriber.integration.translation;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.github.rubenix.yttranscriber.application.ProcessingBudget;
 import io.github.rubenix.yttranscriber.domain.transcription.TranscriptSegment;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
 import io.github.rubenix.yttranscriber.domain.translation.TranslationProvider;
@@ -20,6 +21,9 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.stream.IntStream;
 
 /**
@@ -31,6 +35,8 @@ import java.util.stream.IntStream;
 public class DeepLTranslationProvider implements TranslationProvider {
 
     private static final Logger log = LoggerFactory.getLogger(DeepLTranslationProvider.class);
+    private static final int MAX_TEXTS = 50;
+    private static final int MAX_BODY_BYTES = 128 * 1024;
 
     private final RestClient restClient;
     private final String apiKey;
@@ -48,6 +54,7 @@ public class DeepLTranslationProvider implements TranslationProvider {
 
     @Override
     public List<TranslatedSegment> translate(TranslationRequest request) {
+        ProcessingBudget.check();
         if (apiKey == null || apiKey.isBlank()) {
             throw new ProviderUnavailableException("No translation provider is configured yet.");
         }
@@ -55,25 +62,52 @@ public class DeepLTranslationProvider implements TranslationProvider {
             return List.of();
         }
 
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-        request.segments().forEach(segment -> form.add("text", segment.text()));
-        form.add("target_lang", request.targetLanguage().toUpperCase(Locale.ROOT));
-
-        DeepLResponse response = callDeepL(form);
-
-        if (response == null || response.translations() == null
-                || response.translations().size() != request.segments().size()) {
-            // Counted in the log rather than in the message: a mismatch here means the zip below
-            // would pair the wrong translation with the wrong line, and "how many did we ask for,
-            // how many came back" is the only thing that distinguishes a truncated response from
-            // a schema change. The caller gets none of it -- it says nothing they can act on.
-            log.warn("DeepL returned {} translations for {} segments",
-                    response == null || response.translations() == null ? null : response.translations().size(),
-                    request.segments().size());
-            throw new ProviderUnavailableException("Unexpected response from the translation provider.");
+        String target = request.targetLanguage().toUpperCase(Locale.ROOT);
+        List<List<TranscriptSegment>> batches = batches(request.segments(), target);
+        List<TranslatedSegment> translated = new ArrayList<>(request.segments().size());
+        for (List<TranscriptSegment> batch : batches) {
+            ProcessingBudget.check();
+            MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+            batch.forEach(segment -> form.add("text", segment.text()));
+            form.add("target_lang", target);
+            DeepLResponse response = callDeepL(form);
+            ProcessingBudget.check();
+            if (response == null || response.translations() == null
+                    || response.translations().size() != batch.size()
+                    || response.translations().stream().anyMatch(t -> t == null || t.text() == null)) {
+                log.warn("DeepL returned an invalid response for a batch of {} segments", batch.size());
+                throw new ProviderUnavailableException("Unexpected response from the translation provider.");
+            }
+            translated.addAll(zip(batch, response.translations()));
         }
+        return List.copyOf(translated);
+    }
 
-        return zip(request.segments(), response.translations());
+    private List<List<TranscriptSegment>> batches(List<TranscriptSegment> segments, String target) {
+        int baseBytes = "target_lang=".length() + encodedLength(target);
+        int bytes = baseBytes;
+        int start = 0;
+        List<List<TranscriptSegment>> batches = new ArrayList<>();
+        for (int i = 0; i < segments.size(); i++) {
+            ProcessingBudget.check();
+            // Form encoding is ASCII after UTF-8 percent escaping, not Java string length.
+            int textBytes = "&text=".length() + encodedLength(segments.get(i).text());
+            if (textBytes > MAX_BODY_BYTES - baseBytes) {
+                throw new ProviderUnavailableException("A transcript segment exceeds the translation provider's request limit.");
+            }
+            if (i - start == MAX_TEXTS || textBytes > MAX_BODY_BYTES - bytes) {
+                batches.add(segments.subList(start, i));
+                start = i;
+                bytes = baseBytes;
+            }
+            bytes += textBytes;
+        }
+        batches.add(segments.subList(start, segments.size()));
+        return batches;
+    }
+
+    private int encodedLength(String text) {
+        return URLEncoder.encode(text, StandardCharsets.UTF_8).length();
     }
 
     private DeepLResponse callDeepL(MultiValueMap<String, String> form) {
@@ -103,6 +137,7 @@ public class DeepLTranslationProvider implements TranslationProvider {
             // failure end up looking identical in the log.
             throw new ProviderUnavailableException("DeepL translation request failed.", e);
         } catch (RestClientException e) {
+            ProcessingBudget.check();
             throw new ProviderUnavailableException("DeepL translation request failed.", e);
         }
     }

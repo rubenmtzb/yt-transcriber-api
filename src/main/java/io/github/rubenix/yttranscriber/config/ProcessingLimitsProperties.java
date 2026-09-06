@@ -2,6 +2,8 @@ package io.github.rubenix.yttranscriber.config;
 
 import jakarta.validation.constraints.Min;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
 /**
@@ -21,7 +23,19 @@ public record ProcessingLimitsProperties(
         @Min(1) long maxAudioMinutesPerHour,
         @Min(1) int maxConcurrentTranscriptions,
         @Min(1) int maxRequestsPerHourPerIp,
-        @Min(1) long maxAudioMinutesPerHourPerIp) {
+        @Min(1) long maxAudioMinutesPerHourPerIp,
+        @DefaultValue("1200") @Min(1) long timeoutSeconds) {
+
+    @ConstructorBinding
+    public ProcessingLimitsProperties {
+    }
+
+    public ProcessingLimitsProperties(long maxVideoDurationSeconds, int maxRequestsPerHour,
+                                      long maxAudioMinutesPerHour, int maxConcurrentTranscriptions,
+                                      int maxRequestsPerHourPerIp, long maxAudioMinutesPerHourPerIp) {
+        this(maxVideoDurationSeconds, maxRequestsPerHour, maxAudioMinutesPerHour,
+                maxConcurrentTranscriptions, maxRequestsPerHourPerIp, maxAudioMinutesPerHourPerIp, 1200);
+    }
 
     /**
      * The same limits with the per-IP budgets in the per-session slots, so one
@@ -35,6 +49,7 @@ public record ProcessingLimitsProperties(
                 maxAudioMinutesPerHourPerIp,
                 maxConcurrentTranscriptions,
                 maxRequestsPerHourPerIp,
-                maxAudioMinutesPerHourPerIp);
+                maxAudioMinutesPerHourPerIp,
+                timeoutSeconds);
     }
 }

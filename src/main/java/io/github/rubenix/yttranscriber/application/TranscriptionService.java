@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Locale;
+import java.time.Duration;
 
 /**
  * Orchestrates the synchronous transcription use case: reserve a slot in the global capacity
@@ -64,7 +65,8 @@ public class TranscriptionService {
      */
     public TranscriptionResult process(String youtubeUrl, String targetLanguage, String sessionId, String clientIp,
                                         ProgressListener progress) {
-        return capacityGuard.runWithinCapacity(() -> {
+        return ProcessingBudget.run(Duration.ofSeconds(limits.timeoutSeconds()),
+                () -> capacityGuard.runWithinCapacity(() -> {
             // Charged only once a capacity permit is actually held. Charging before would spend one
             // of the caller's hourly requests on a "server busy" rejection that did no work at all
             // -- and since RATE_LIMITED is flagged retryable, the UI invites exactly the retries
@@ -80,8 +82,9 @@ public class TranscriptionService {
             sessionUsageLimiter.checkAndRecordRequest(sessionId);
             ipUsageLimiter.checkAndRecordRequest(clientIp);
 
-            progress.onStage(ProcessingStage.RESOLVING_VIDEO);
+            reportStage(progress, ProcessingStage.RESOLVING_VIDEO);
             SourceResolution resolution = sourceResolutionService.resolve(youtubeUrl);
+            ProcessingBudget.check();
             requireWithinDurationLimit(resolution.video().durationSeconds());
             sessionUsageLimiter.checkAndRecordAudioMinutes(sessionId, resolution.video().durationSeconds());
             ipUsageLimiter.checkAndRecordAudioMinutes(clientIp, resolution.video().durationSeconds());
@@ -89,7 +92,7 @@ public class TranscriptionService {
             String sourceLanguage;
             List<TranscriptSegment> segments;
             if (resolution.segments().isEmpty()) {
-                progress.onStage(ProcessingStage.TRANSCRIBING);
+                reportStage(progress, ProcessingStage.TRANSCRIBING);
                 TranscriptionOutcome outcome = transcriptionProvider.transcribe(
                         new TranscriptionRequest(youtubeUrl, resolution.video(), resolution.sourceLanguage()));
                 sourceLanguage = outcome.language();
@@ -100,13 +103,20 @@ public class TranscriptionService {
             }
             sourceLanguage = normalizeLanguageCode(sourceLanguage);
 
-            progress.onStage(ProcessingStage.TRANSLATING);
+            reportStage(progress, ProcessingStage.TRANSLATING);
             List<TranscriptSegment> grouped = sentenceGrouper.group(segments);
+            ProcessingBudget.check();
             List<TranslatedSegment> translated = translationService.translate(grouped, sourceLanguage, targetLanguage);
 
-            progress.onStage(ProcessingStage.PREPARING_RESULT);
+            reportStage(progress, ProcessingStage.PREPARING_RESULT);
             return new TranscriptionResult(resolution.video(), sourceLanguage, targetLanguage, resolution.source(), translated);
-        });
+        }));
+    }
+
+    private void reportStage(ProgressListener progress, ProcessingStage stage) {
+        ProcessingBudget.check();
+        progress.onStage(stage);
+        ProcessingBudget.check();
     }
 
     // YouTube caption tracks can carry a region/script subtag ("pt-BR", "es-419"); Whisper's

@@ -5,7 +5,7 @@
 [![CI](https://github.com/rubenmtzb/yt-transcriber-api/actions/workflows/ci.yml/badge.svg)](https://github.com/rubenmtzb/yt-transcriber-api/actions/workflows/ci.yml)
 [![Java](https://img.shields.io/badge/Java-25-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/25/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![Tests](https://img.shields.io/badge/tests-138%20passing-3fbf7f)](src/test/java)
+[![Tests](https://img.shields.io/badge/tests-177%20passing-3fbf7f)](src/test/java)
 [![License](https://img.shields.io/badge/license-MIT-9a94b8)](LICENSE)
 
 ### **[▸ Try the app](https://yt.rubenitx.me)** · **[Frontend repository →](https://github.com/rubenmtzb/yt-transcriber-web)**
@@ -30,10 +30,11 @@ each be swapped without touching the domain or application layers.
 - `POST /api/v1/transcriptions` — one blocking request/response, with request validation.
 - `GET /api/v1/transcriptions/stream` — the same use case over Server-Sent Events, reporting real progress as it happens.
 - Layered architecture (`api` → `application` → `domain`, with `integration` adapters behind ports).
-- Source resolution via `yt-dlp` (invoked as a subprocess): video metadata plus captions in **any** language, preferring uploader-provided subtitles over auto-generated ones, and the original ASR track over YouTube's own machine translations of it.
+- Source resolution via `yt-dlp` (invoked as a subprocess): video metadata plus captions in **any** language, preferring the original language (manual subtitles before ASR) over foreign-language subtitles, and the original ASR track over YouTube's own machine translations of it.
 - Local Speech-to-Text fallback via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for videos with no captions in any language — runs entirely on the machine, no external API and no per-request cost.
 - Caption cues grouped into sentence-level units before translation, so the translator sees whole sentences instead of on-screen line wraps.
-- Translation via the DeepL API, with its per-minute rate limit and its monthly quota mapped to distinct error codes.
+- Translation via the DeepL API in ordered batches (at most 50 texts and 128 KiB of encoded body per request), with its per-minute rate limit and its monthly quota mapped to distinct error codes.
+- One global processing deadline shared by resolution, Speech-to-Text and every translation batch, rather than a fresh timeout allowance for each call.
 - Two-bucket rate limiting — an anonymous per-session budget for honest UI feedback, and a per-client-address budget that is the ceiling that actually holds — plus a global concurrency guard.
 - CORS locked to the configured frontend origin(s).
 - Centralized error handling with a stable JSON error envelope and a per-request correlation id.
@@ -67,7 +68,11 @@ curl -X POST http://localhost:8080/api/v1/transcriptions \
 }
 ```
 
-`targetLanguage` is an ISO 639-1 two-letter code. `sourceLanguage` is detected, not requested.
+`targetLanguage` is an ISO 639-1 two-letter code. `sourceLanguage` identifies the selected transcript's
+language, not necessarily the original audio: if metadata and original ASR tracks cannot identify the
+original language, the API falls back deterministically to an available manual subtitle language.
+When an original-language hint is available, matching manual subtitles (including regional variants)
+take priority, then original automatic captions, and only then foreign manual subtitles.
 
 ### `GET /api/v1/transcriptions/stream`
 
@@ -88,7 +93,16 @@ It is a `GET` with query parameters rather than a `POST` with a body because the
 
 Between two stage events nothing goes down the wire, and those gaps are long: resolving a video is allowed 120 seconds and the Speech-to-Text path runs for minutes. Cloudflare applies a proxy read timeout to the origin connection -- 125 seconds by default -- and answers a 524 once a read takes longer than that, so the stream writes an SSE comment every 20 seconds to keep it open. The SSE grammar requires a reader to ignore comments, so `EventSource` never surfaces them and a client needs to know nothing about it.
 
-If the client closes the stream, the run is abandoned at the next stage boundary rather than carried to completion. Otherwise it would hold one of very few processing slots busy building a result nobody will read. An in-flight subprocess still finishes the stage it is on, since there is no cheap way to kill one mid-call.
+Heartbeat writes are serialized with events and stop when the run completes or the container reports
+a timeout, error or completion. Responses carry `Cache-Control: no-cache, no-transform` and
+`X-Accel-Buffering: no` to discourage proxy buffering. Heartbeats keep the connection alive; they
+do **not** reset the processing deadline. Once the stream is open, a deadline failure is an `error`
+event with code `PROCESSING_TIMEOUT`, not a change to the already-sent HTTP status.
+
+If the client closes the stream, the run is abandoned at the next stage boundary rather than carried
+to completion. Disconnecting does not interrupt an already-started provider call: it completes or
+reaches its timeout (capped by the remaining global budget) before the pipeline observes the
+disconnect. No later stage is started once that disconnect is observed.
 
 ### `GET /api/v1/transcriptions/usage`
 
@@ -132,6 +146,7 @@ Every failure returns the same envelope, on both endpoints:
 | `VIDEO_TOO_LONG`             | 413  | no        | Over `MAX_VIDEO_DURATION_SECONDS`                   |
 | `RATE_LIMITED`               | 429  | yes       | Session budget spent, or the server is at capacity. Being turned away for capacity does not spend any of the caller's budget |
 | `PROVIDER_UNAVAILABLE`       | 503  | yes       | An upstream provider or local binary failed         |
+| `PROCESSING_TIMEOUT`         | 504  | yes       | The shared processing deadline was exceeded         |
 | `TRANSLATION_QUOTA_EXCEEDED` | 503  | no        | DeepL's monthly character quota is used up          |
 | `INTERNAL_ERROR`             | 500  | no        | Unhandled failure                                   |
 
@@ -157,6 +172,21 @@ Spring Boot API (this repo)
 The domain layer has no dependency on Spring, HTTP clients, or any provider SDK. It is ports and records only. Each port has exactly one adapter today (`YtDlpSourceProvider`, `WhisperTranscriptionProvider`, `DeepLTranslationProvider`), and swapping any of them touches nothing above the `integration` package.
 
 The two subprocess-backed adapters share `ExternalProcessRunner` (bounded timeout, stdout/stderr drained on separate threads so a full pipe buffer cannot deadlock the child) and `TempWorkspace` (a throwaway output directory tied to the run via try-with-resources).
+
+`ProcessingBudget` binds a monotonic deadline to the synchronous pipeline with Java 25 `ScopedValue`.
+It is isolated per request and removed on success or failure. Each subprocess and HTTP request uses
+the smaller of its existing timeout and the remaining global budget; subprocess output draining
+shares that same call deadline. Expiry prevents later stages and batches from starting, discards late
+results, stops the active subprocess and its live descendants, and releases the capacity permit.
+CPU-only grouping/parsing checks expiry at stage boundaries rather than forcibly interrupting Java
+code. The deadline covers processing, not delivery of the final HTTP response to a slow client.
+
+DeepL batching counts the actual UTF-8 form-encoded body, including fields and separators, not Java
+characters. Segment order, sequence numbers, timestamps and word timings remain unchanged. An
+individual segment larger than the provider limit is rejected before any batch is sent; it is not
+silently truncated or split into different timed segments. Responses are validated per batch and a
+later failure fails the whole operation, with no partial result or automatic retry (earlier batches
+may already have consumed provider quota).
 
 Transcription is a fallback, not the main path: `SourceProvider` returns empty segments when a video has no usable captions in any language, and only then does `TranscriptionService` invoke `TranscriptionProvider`. With no Whisper model configured, that path fails cleanly with `PROVIDER_UNAVAILABLE` and everything else keeps working.
 
@@ -206,13 +236,14 @@ Copy `.env.example` to `.env` and fill in the values you need locally.
 | `MAX_REQUESTS_PER_HOUR_PER_IP`       | 12            | Processings per client address per hour. **This is the limit that actually holds.** Looser than the per-session one because an address is shared by everyone behind one router |
 | `MAX_AUDIO_MINUTES_PER_HOUR_PER_IP`  | 240           | Audio-minutes budget per client address per hour             |
 | `MAX_CONCURRENT_TRANSCRIPTIONS`      | 2             | Global cap on transcriptions processed at once               |
+| `PROCESSING_TIMEOUT_SECONDS`        | 1200          | Shared time budget for the complete processing pipeline; must be positive. Applies to both POST and SSE |
 | `CORS_ALLOWED_ORIGINS`               | `http://localhost:4321` | Comma-separated frontend origins allowed to call the API. **Leaving this empty makes every browser request fail with `Invalid CORS request` while curl keeps working** — the startup log says so at ERROR |
 | `ACTUATOR_ENDPOINTS`                 | `health`      | Actuator endpoints to publish. Only `health` in production: `metrics` and `prometheus` are unauthenticated and hand out heap, GC, disk and per-endpoint latencies to anyone |
 | `YTDLP_BINARY_PATH`                  | `yt-dlp`      | Path to the yt-dlp executable                                |
-| `YTDLP_TIMEOUT_SECONDS`              | 120           | Timeout for each yt-dlp subprocess call. Generous on purpose: the resolve step is network-bound and a tight bound turns a slow response into an indistinguishable failure |
+| `YTDLP_TIMEOUT_SECONDS`              | 120           | Timeout for each yt-dlp subprocess call, capped by the remaining global processing budget |
 | `WHISPER_BINARY_PATH`                | `whisper-cli` | Path to the whisper.cpp CLI executable                       |
 | `WHISPER_MODEL_PATH`                 | (empty)       | Path to a ggml model file. Empty disables local Speech-to-Text (videos with no captions in any language then fail with `PROVIDER_UNAVAILABLE` instead of transcribing) |
-| `WHISPER_TIMEOUT_SECONDS`            | 900           | Timeout applied to each of the two subprocess calls on this path (audio extraction, then whisper-cli), so it bounds a stage rather than the run |
+| `WHISPER_TIMEOUT_SECONDS`            | 900           | Timeout for each audio-extraction / whisper-cli subprocess, capped by the remaining global processing budget |
 | `WHISPER_MIN_AUDIO_DURATION_SECONDS` | 15            | Videos shorter than this skip Speech-to-Text (language auto-detection is unreliable on very short clips) |
 
 ### Rate limiting

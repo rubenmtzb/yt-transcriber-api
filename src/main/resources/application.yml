@@ -27,6 +27,7 @@ app:
   # than no version at all: it is a field that looks like an answer and never changes.
   version: @project.version@
   processing:
+    timeout-seconds: ${PROCESSING_TIMEOUT_SECONDS:1200}
     max-video-duration-seconds: ${MAX_VIDEO_DURATION_SECONDS:1200}
     max-requests-per-hour: ${MAX_REQUESTS_PER_HOUR:3}
     max-audio-minutes-per-hour: ${MAX_AUDIO_MINUTES_PER_HOUR:60}

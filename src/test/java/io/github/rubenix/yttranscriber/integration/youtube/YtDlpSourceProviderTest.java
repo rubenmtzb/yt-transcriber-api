@@ -162,6 +162,49 @@ class YtDlpSourceProviderTest {
     }
 
     @Test
+    void usesOriginalAsrLanguageToSelectManualCaptionsWhenMetadataOmitsLanguage() {
+        var info = rawInfo(null, Map.of("de", List.of(), "en", List.of()), Map.of("en-orig", List.of()));
+
+        assertThat(sourceProvider.selectCaptionTrack(info)).contains(new CaptionTrack("en", true));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"en", "en-US", "EN"})
+    void matchesManualRegionalVariantsBeforeAlphabeticalForeignLanguages(String declared) {
+        var info = rawInfo(declared, Map.of("de", List.of(), "en-GB", List.of()), Map.of());
+
+        assertThat(sourceProvider.selectCaptionTrack(info)).contains(new CaptionTrack("en-GB", true));
+    }
+
+    @Test
+    void prefersAnExactManualLanguageOverAnotherRegionalVariant() {
+        var info = rawInfo("pt-PT", Map.of("pt-BR", List.of(), "pt-PT", List.of()), Map.of());
+
+        assertThat(sourceProvider.selectCaptionTrack(info)).contains(new CaptionTrack("pt-PT", true));
+    }
+
+    @Test
+    void prefersOriginalAsrOverForeignManualSubtitles() {
+        var info = rawInfo(null, Map.of("de", List.of()), Map.of("en-orig", List.of(), "de", List.of()));
+
+        assertThat(sourceProvider.selectCaptionTrack(info)).contains(new CaptionTrack("en", false));
+    }
+
+    @Test
+    void prefersDeclaredOriginalAutomaticCaptionsOverForeignManualSubtitles() {
+        var info = rawInfo("en", Map.of("de", List.of()), Map.of("en", List.of()));
+
+        assertThat(sourceProvider.selectCaptionTrack(info)).contains(new CaptionTrack("en", false));
+    }
+
+    @Test
+    void keepsManualFallbackWhenTheOriginalLanguageCannotBeIdentified() {
+        var info = rawInfo(null, Map.of("de", List.of(), "en", List.of()), Map.of());
+
+        assertThat(sourceProvider.selectCaptionTrack(info)).contains(new CaptionTrack("de", true));
+    }
+
+    @Test
     void ignoresLegacyCommunityContributionKeysWhenPickingAManualTrack() {
         RawVideoInfo info = rawInfo(null, Map.of("es", List.of(), "es-ES-7eCR4kqQbL4", List.of()), Map.of());
 
@@ -200,6 +243,29 @@ class YtDlpSourceProviderTest {
     }
 
     // -- end-to-end wiring: metadata + selection + segment fetch all click together -------------
+
+    @Test
+    void resolvesEnglishManualCaptionsInsteadOfAlphabeticalGermanWhenAsrIdentifiesTheOriginal() {
+        when(processRunner.run(any(), any())).thenAnswer(invocation -> {
+            List<String> command = invocation.getArgument(0);
+            if (command.contains("--print")) {
+                return new ProcessResult(0, """
+                        {"id":"original","title":"Original language","duration":19,"is_live":false,
+                         "language":null,"subtitles":{"de":[],"en":[]},"automatic_captions":{"en-orig":[]}}
+                        """, "");
+            }
+            assertThat(command).contains("--write-subs", "en");
+            Path dir = Path.of(command.get(command.indexOf("-P") + 1));
+            Files.writeString(dir.resolve("original.en.json3"), SAMPLE_JSON3);
+            return new ProcessResult(0, "", "");
+        });
+
+        var resolution = sourceProvider.resolve(new SourceRequest("https://youtu.be/original"));
+
+        assertThat(resolution.sourceLanguage()).isEqualTo("en");
+        assertThat(resolution.source()).isEqualTo(TranscriptSource.MANUAL_CAPTIONS);
+        assertThat(resolution.segments()).hasSize(2);
+    }
 
     @Test
     void resolvesAVideoInARussianOriginalLanguageEndToEnd() {

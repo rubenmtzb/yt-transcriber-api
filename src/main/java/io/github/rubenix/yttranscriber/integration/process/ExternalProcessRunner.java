@@ -1,5 +1,6 @@
 package io.github.rubenix.yttranscriber.integration.process;
 
+import io.github.rubenix.yttranscriber.application.ProcessingBudget;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import org.springframework.stereotype.Component;
 
@@ -24,6 +25,8 @@ public class ExternalProcessRunner {
     }
 
     public ProcessResult run(List<String> command, Duration timeout) {
+        Duration effectiveTimeout = ProcessingBudget.cap(timeout);
+        long deadline = System.nanoTime() + effectiveTimeout.toNanos();
         Process process = start(command);
 
         StreamGobbler stdout = new StreamGobbler(process.getInputStream());
@@ -31,16 +34,28 @@ public class ExternalProcessRunner {
         Thread stdoutThread = Thread.ofVirtual().start(stdout);
         Thread stderrThread = Thread.ofVirtual().start(stderr);
 
-        if (!waitFor(process, timeout, command)) {
-            process.destroyForcibly();
-            throw new ProviderUnavailableException(
-                    "Process timed out after %s: %s".formatted(timeout, command.getFirst()));
+        try {
+            if (!process.waitFor(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
+                    || !joinUntil(stdoutThread, deadline) || !joinUntil(stderrThread, deadline)) {
+                ProcessingBudget.check();
+                throw new ProviderUnavailableException(
+                        "Process timed out after %s: %s".formatted(effectiveTimeout, command.getFirst()));
+            }
+            ProcessingBudget.check();
+            return new ProcessResult(process.exitValue(), stdout.output(), stderr.output());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            ProcessingBudget.check();
+            throw new ProviderUnavailableException("Interrupted while waiting for process: " + command.getFirst());
+        } finally {
+            // yt-dlp can be waiting on ffmpeg; stopping only the parent leaves CPU work behind.
+            process.descendants().forEach(ProcessHandle::destroyForcibly);
+            if (process.isAlive()) {
+                process.destroyForcibly();
+            }
+            stdoutThread.interrupt();
+            stderrThread.interrupt();
         }
-
-        joinQuietly(stdoutThread);
-        joinQuietly(stderrThread);
-
-        return new ProcessResult(process.exitValue(), stdout.output(), stderr.output());
     }
 
     private Process start(List<String> command) {
@@ -51,22 +66,12 @@ public class ExternalProcessRunner {
         }
     }
 
-    private boolean waitFor(Process process, Duration timeout, List<String> command) {
-        try {
-            return process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            process.destroyForcibly();
-            throw new ProviderUnavailableException("Interrupted while waiting for process: " + command.getFirst());
+    private boolean joinUntil(Thread thread, long deadline) throws InterruptedException {
+        if (!thread.isAlive()) {
+            return true;
         }
-    }
-
-    private void joinQuietly(Thread thread) {
-        try {
-            thread.join();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        long remaining = deadline - System.nanoTime();
+        return remaining > 0 && thread.join(Duration.ofNanos(remaining));
     }
 
     private static final class StreamGobbler implements Runnable {

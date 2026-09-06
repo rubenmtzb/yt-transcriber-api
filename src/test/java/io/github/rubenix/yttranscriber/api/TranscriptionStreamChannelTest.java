@@ -5,6 +5,7 @@ import io.github.rubenix.yttranscriber.application.ProcessingStage;
 import io.github.rubenix.yttranscriber.exception.ErrorCode;
 import io.github.rubenix.yttranscriber.exception.ErrorResponse;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -34,11 +35,23 @@ class TranscriptionStreamChannelTest {
 
     @Mock
     private SseEmitter emitter;
+    private final List<TranscriptionStreamChannel> channels = new java.util.ArrayList<>();
+
+    @AfterEach
+    void stopHeartbeats() {
+        channels.forEach(TranscriptionStreamChannel::complete);
+    }
+
+    private TranscriptionStreamChannel channel(SseEmitter target, Duration interval) {
+        var channel = new TranscriptionStreamChannel(target, interval);
+        channels.add(channel);
+        return channel;
+    }
 
     @Test
     void abortsTheRunWhenAWriteFailsBecauseTheClientLeft() throws Exception {
         doThrow(new IOException("broken pipe")).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
-        TranscriptionStreamChannel channel = new TranscriptionStreamChannel(emitter);
+        TranscriptionStreamChannel channel = channel(emitter, Duration.ofSeconds(20));
 
         assertThatThrownBy(() -> channel.sendStage(ProcessingStage.RESOLVING_VIDEO))
                 .isInstanceOf(StreamAborted.class);
@@ -46,7 +59,7 @@ class TranscriptionStreamChannelTest {
 
     @Test
     void stopsWritingOnceTheContainerHasReportedTheDisconnect() throws Exception {
-        TranscriptionStreamChannel channel = new TranscriptionStreamChannel(emitter);
+        TranscriptionStreamChannel channel = channel(emitter, Duration.ofSeconds(20));
 
         // The container signals a dropped connection through the onError callback the channel
         // registered on construction, which can land before any write of ours would have failed.
@@ -59,7 +72,7 @@ class TranscriptionStreamChannelTest {
 
     @Test
     void keepsStreamingWhileTheClientIsStillThere() throws Exception {
-        TranscriptionStreamChannel channel = new TranscriptionStreamChannel(emitter);
+        TranscriptionStreamChannel channel = channel(emitter, Duration.ofSeconds(20));
 
         assertThatCode(() -> channel.sendStage(ProcessingStage.RESOLVING_VIDEO)).doesNotThrowAnyException();
         assertThatCode(() -> channel.sendStage(ProcessingStage.TRANSLATING)).doesNotThrowAnyException();
@@ -70,7 +83,7 @@ class TranscriptionStreamChannelTest {
     @Test
     void swallowsAFailedErrorEventBecauseThereIsNowhereLeftToReportIt() throws Exception {
         doThrow(new IOException("broken pipe")).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
-        TranscriptionStreamChannel channel = new TranscriptionStreamChannel(emitter);
+        TranscriptionStreamChannel channel = channel(emitter, Duration.ofSeconds(20));
 
         assertThatCode(() -> channel.sendError(
                 ErrorResponse.of(ErrorCode.INTERNAL_ERROR, "boom", "request-1"))).doesNotThrowAnyException();
@@ -82,7 +95,7 @@ class TranscriptionStreamChannelTest {
         // response that goes 100 seconds without a chunk -- so silence is what turned the longest
         // runs, the ones that had nearly finished, into "lost connection".
         RecordingEmitter recording = new RecordingEmitter();
-        new TranscriptionStreamChannel(recording, Duration.ofMillis(30));
+        channel(recording, Duration.ofMillis(30));
 
         awaitUntil(() -> recording.written().size() >= 2);
 
@@ -94,7 +107,7 @@ class TranscriptionStreamChannelTest {
     @Test
     void stopsBeatingOnceTheRunIsOver() throws Exception {
         RecordingEmitter recording = new RecordingEmitter();
-        TranscriptionStreamChannel channel = new TranscriptionStreamChannel(recording, Duration.ofMillis(30));
+        TranscriptionStreamChannel channel = channel(recording, Duration.ofMillis(30));
         awaitUntil(() -> !recording.written().isEmpty());
 
         channel.complete();
@@ -105,6 +118,47 @@ class TranscriptionStreamChannelTest {
         // stream that was ever opened.
         Thread.sleep(200);
         assertThat(recording.written()).hasSize(writtenAtCompletion);
+    }
+
+    @Test
+    void containerCompletionStopsAllFurtherWrites() throws Exception {
+        var channel = channel(emitter, Duration.ofSeconds(20));
+        ArgumentCaptor<Runnable> callback = ArgumentCaptor.forClass(Runnable.class);
+        verify(emitter).onCompletion(callback.capture());
+        callback.getValue().run();
+
+        assertThatThrownBy(() -> channel.sendStage(ProcessingStage.TRANSLATING)).isInstanceOf(StreamAborted.class);
+        assertThatCode(() -> channel.sendError(ErrorResponse.of(ErrorCode.INTERNAL_ERROR, "error", "id")))
+                .doesNotThrowAnyException();
+        verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
+    }
+
+    @Test
+    void containerTimeoutStopsAllFurtherWrites() throws Exception {
+        var channel = channel(emitter, Duration.ofSeconds(20));
+        ArgumentCaptor<Runnable> callback = ArgumentCaptor.forClass(Runnable.class);
+        verify(emitter).onTimeout(callback.capture());
+        callback.getValue().run();
+
+        assertThatThrownBy(() -> channel.sendStage(ProcessingStage.TRANSLATING)).isInstanceOf(StreamAborted.class);
+        verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
+    }
+
+    @Test
+    void completionIsIdempotentAndDoesNotAllowAnotherEvent() throws Exception {
+        var channel = channel(emitter, Duration.ofSeconds(20));
+        channel.complete();
+        channel.complete();
+
+        assertThatThrownBy(() -> channel.sendStage(ProcessingStage.TRANSLATING)).isInstanceOf(StreamAborted.class);
+        verify(emitter, times(1)).complete();
+        verify(emitter, never()).send(any(SseEmitter.SseEventBuilder.class));
+    }
+
+    @Test
+    void rejectsNonPositiveHeartbeatIntervals() {
+        assertThatThrownBy(() -> new TranscriptionStreamChannel(emitter, Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static void awaitUntil(BooleanSupplier condition) {
