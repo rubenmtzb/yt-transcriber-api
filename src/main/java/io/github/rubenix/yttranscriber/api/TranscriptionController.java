@@ -14,6 +14,7 @@ import io.github.rubenix.yttranscriber.limiter.SessionIdFilter;
 import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
 import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -93,7 +94,10 @@ public class TranscriptionController {
             @Pattern(regexp = TranscriptionRequestDto.YOUTUBE_URL_PATTERN) String youtubeUrl,
             @RequestParam @NotBlank @Pattern(regexp = TranscriptionRequestDto.TARGET_LANGUAGE_PATTERN) String targetLanguage,
             @RequestAttribute(SessionIdFilter.REQUEST_ATTRIBUTE) String sessionId,
-            @RequestAttribute(ClientIpFilter.REQUEST_ATTRIBUTE) String clientIp) {
+            @RequestAttribute(ClientIpFilter.REQUEST_ATTRIBUTE) String clientIp,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-cache, no-transform");
+        response.setHeader("X-Accel-Buffering", "no");
         SseEmitter emitter = new SseEmitter(0L);
         TranscriptionStreamChannel channel = new TranscriptionStreamChannel(emitter);
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);

@@ -19,9 +19,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>Once it isn't, {@link #sendStage} throws {@link StreamAborted} instead of writing. That
  * unwinds the pipeline, which is what releases the capacity permit the run is holding -- carrying
  * on would keep one of very few processing slots busy building a result nobody will ever read.
- * Cancellation lands at the next stage boundary rather than instantly: there is no cheap way to
- * kill a blocking subprocess mid-call, so an in-flight yt-dlp or whisper-cli still finishes the
- * stage it is on before the run gives up.
+ * Disconnect cancellation is checked at stage boundaries; it does not interrupt an in-flight
+ * provider call. That call completes or reaches its own timeout (capped by the global budget)
+ * before the pipeline observes the disconnect.
  */
 class TranscriptionStreamChannel {
 
@@ -45,6 +45,7 @@ class TranscriptionStreamChannel {
 
     private final SseEmitter emitter;
     private final AtomicBoolean clientGone = new AtomicBoolean(false);
+    private final AtomicBoolean completed = new AtomicBoolean(false);
     /**
      * Serialises writes. The heartbeat runs on its own thread, so without this it and the pipeline
      * thread could be inside {@link SseEmitter#send} at the same time -- which interleaves two
@@ -58,12 +59,16 @@ class TranscriptionStreamChannel {
     }
 
     TranscriptionStreamChannel(SseEmitter emitter, Duration heartbeatInterval) {
+        if (heartbeatInterval.isNegative() || heartbeatInterval.isZero()) {
+            throw new IllegalArgumentException("Heartbeat interval must be positive.");
+        }
         this.emitter = emitter;
         // The container reports a dropped connection asynchronously, so this can flip before our
         // next write would have failed on its own -- which is exactly what lets a long stage be
         // the last one we run rather than the last one we notice.
-        emitter.onError(throwable -> clientGone.set(true));
-        emitter.onTimeout(() -> clientGone.set(true));
+        emitter.onError(throwable -> abandon());
+        emitter.onTimeout(this::abandon);
+        emitter.onCompletion(this::abandon);
         Thread.ofVirtual().start(() -> beatUntilFinished(heartbeatInterval));
     }
 
@@ -93,9 +98,12 @@ class TranscriptionStreamChannel {
     }
 
     void sendError(ErrorResponse error) {
+        if (clientGone.get() || finished.getCount() == 0) {
+            return;
+        }
         try {
             send(SseEmitter.event().name("error").data(error));
-        } catch (IOException | IllegalStateException ignored) {
+        } catch (IOException | IllegalStateException | StreamAborted ignored) {
             // client already gone; there is nowhere left to report this
         }
     }
@@ -106,7 +114,9 @@ class TranscriptionStreamChannel {
         finished.countDown();
         writeLock.lock();
         try {
-            emitter.complete();
+            if (completed.compareAndSet(false, true)) {
+                emitter.complete();
+            }
         } finally {
             writeLock.unlock();
         }
@@ -115,7 +125,13 @@ class TranscriptionStreamChannel {
     private void send(SseEmitter.SseEventBuilder event) throws IOException {
         writeLock.lock();
         try {
+            if (clientGone.get() || finished.getCount() == 0) {
+                throw new StreamAborted();
+            }
             emitter.send(event);
+        } catch (IOException | IllegalStateException e) {
+            abandon();
+            throw e;
         } finally {
             writeLock.unlock();
         }
@@ -125,7 +141,7 @@ class TranscriptionStreamChannel {
         try {
             // Waits on the latch rather than sleeping, so a run that finishes in two seconds takes
             // the heartbeat thread down with it instead of leaving it parked for a full interval.
-            while (!finished.await(interval.toMillis(), TimeUnit.MILLISECONDS)) {
+            while (!finished.await(interval.toNanos(), TimeUnit.NANOSECONDS)) {
                 if (clientGone.get() || !beat()) {
                     return;
                 }
@@ -140,12 +156,17 @@ class TranscriptionStreamChannel {
         try {
             send(SseEmitter.event().comment("keep-alive"));
             return true;
-        } catch (IOException | IllegalStateException e) {
+        } catch (IOException | IllegalStateException | StreamAborted e) {
             // Either the client hung up or the run completed between the latch check and this write.
             // Both mean the same thing here: stop.
-            clientGone.set(true);
+            abandon();
             return false;
         }
+    }
+
+    private void abandon() {
+        clientGone.set(true);
+        finished.countDown();
     }
 
     /**
