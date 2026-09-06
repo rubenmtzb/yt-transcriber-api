@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.List;
+
 /**
  * Locks CORS down to the configured frontend origin(s) only — never a wildcard, since
  * allowCredentials(true) is kept for forward compatibility and browsers reject wildcard origins
@@ -27,18 +29,23 @@ public class CorsConfig {
 
     @Bean
     public WebMvcConfigurer corsConfigurer(CorsProperties properties) {
-        if (properties.allowedOrigins() == null || properties.allowedOrigins().isEmpty()) {
+        // Resolved once. Reading the record twice -- guarding against null here and dereferencing it
+        // again inside addCorsMappings -- is how the null this very branch exists to catch would
+        // still reach a NullPointerException, and it would surface at startup rather than as the
+        // clear message below.
+        List<String> allowedOrigins = properties.allowedOrigins() != null ? properties.allowedOrigins() : List.of();
+        if (allowedOrigins.isEmpty()) {
             log.error("app.cors.allowed-origins (CORS_ALLOWED_ORIGINS) is empty -- every browser "
                     + "request to this API will be refused with 'Invalid CORS request'. Set it to the "
                     + "frontend origin(s), comma separated.");
         } else {
-            log.info("CORS enabled for origins: {}", properties.allowedOrigins());
+            log.info("CORS enabled for origins: {}", allowedOrigins);
         }
         return new WebMvcConfigurer() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins(properties.allowedOrigins().toArray(String[]::new))
+                        .allowedOrigins(allowedOrigins.toArray(String[]::new))
                         .allowedMethods("GET", "POST", "OPTIONS")
                         .allowedHeaders("*")
                         .exposedHeaders("X-Session-Id", "X-Request-Id")

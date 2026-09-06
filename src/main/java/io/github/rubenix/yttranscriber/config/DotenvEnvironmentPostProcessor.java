@@ -66,9 +66,26 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
                 continue;
             }
             String key = trimmed.substring(0, separator).trim();
-            String value = trimmed.substring(separator + 1).trim();
-            values.put(key, value);
+            values.put(key, unquote(trimmed.substring(separator + 1).trim()));
         }
         return values;
+    }
+
+    /**
+     * Drops one matching pair of surrounding quotes. Writing {@code KEY="value"} is ordinary .env
+     * practice, and the quotes are the shell's syntax rather than part of the value -- kept, they
+     * are invisible in the startup line (which prints key names only) and turn up as a rejected
+     * credential. A quoted DeepL key fails twice over: the trailing quote also hides the ":fx"
+     * suffix the adapter reads to pick the free endpoint, so the request goes to the paid host and
+     * the refusal reads like a billing problem rather than a typo.
+     */
+    private static String unquote(String value) {
+        if (value.length() >= 2) {
+            char first = value.charAt(0);
+            if ((first == '"' || first == '\'') && value.charAt(value.length() - 1) == first) {
+                return value.substring(1, value.length() - 1);
+            }
+        }
+        return value;
     }
 }

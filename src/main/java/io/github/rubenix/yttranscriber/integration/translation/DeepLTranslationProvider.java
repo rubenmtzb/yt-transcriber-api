@@ -8,6 +8,8 @@ import io.github.rubenix.yttranscriber.domain.translation.TranslationRequest;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
 import io.github.rubenix.yttranscriber.exception.RateLimitedException;
 import io.github.rubenix.yttranscriber.exception.TranslationQuotaExceededException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -27,6 +29,8 @@ import java.util.stream.IntStream;
  */
 @Component
 public class DeepLTranslationProvider implements TranslationProvider {
+
+    private static final Logger log = LoggerFactory.getLogger(DeepLTranslationProvider.class);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -59,6 +63,13 @@ public class DeepLTranslationProvider implements TranslationProvider {
 
         if (response == null || response.translations() == null
                 || response.translations().size() != request.segments().size()) {
+            // Counted in the log rather than in the message: a mismatch here means the zip below
+            // would pair the wrong translation with the wrong line, and "how many did we ask for,
+            // how many came back" is the only thing that distinguishes a truncated response from
+            // a schema change. The caller gets none of it -- it says nothing they can act on.
+            log.warn("DeepL returned {} translations for {} segments",
+                    response == null || response.translations() == null ? null : response.translations().size(),
+                    request.segments().size());
             throw new ProviderUnavailableException("Unexpected response from the translation provider.");
         }
 
@@ -86,9 +97,13 @@ public class DeepLTranslationProvider implements TranslationProvider {
                 throw new TranslationQuotaExceededException(
                         "This demo's monthly translation quota has been used up.");
             }
-            throw new ProviderUnavailableException("DeepL translation request failed.");
+            // Everything else -- a rejected key (403), a malformed request (400), an outage at
+            // DeepL's end -- reaches the caller as the same deliberately vague 503, so the cause is
+            // the only record of which one it was. Dropping it is how an expired key and a network
+            // failure end up looking identical in the log.
+            throw new ProviderUnavailableException("DeepL translation request failed.", e);
         } catch (RestClientException e) {
-            throw new ProviderUnavailableException("DeepL translation request failed.");
+            throw new ProviderUnavailableException("DeepL translation request failed.", e);
         }
     }
 

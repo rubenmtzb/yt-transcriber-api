@@ -94,4 +94,24 @@ class DeepLTranslationProviderTest {
         assertThatThrownBy(() -> provider.translate(request))
                 .isInstanceOf(TranslationQuotaExceededException.class);
     }
+
+    @Test
+    void keepsWhatDeepLActuallyAnsweredWhenTheCallIsRejected() {
+        // 403 (a key that has been rotated or revoked), 400 and a DeepL outage all reach the caller
+        // as the same vague 503. Without the cause the log says only "request failed", and an
+        // expired key is indistinguishable from a network problem -- which is the state this was
+        // found in, right before the key was due to be rotated.
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api-free.deepl.com/v2/translate"))
+                .andRespond(withStatus(HttpStatusCode.valueOf(403)));
+
+        var provider = new DeepLTranslationProvider(builder, new DeepLProperties("revoked-key:fx"));
+        var request = new TranslationRequest(List.of(new TranscriptSegment(0, 0, 1000, "hi")), "es");
+
+        assertThatThrownBy(() -> provider.translate(request))
+                .isInstanceOf(ProviderUnavailableException.class)
+                .hasCauseInstanceOf(Exception.class)
+                .cause().hasMessageContaining("403");
+    }
 }

@@ -5,7 +5,7 @@
 [![CI](https://github.com/rubenmtzb/yt-transcriber-api/actions/workflows/ci.yml/badge.svg)](https://github.com/rubenmtzb/yt-transcriber-api/actions/workflows/ci.yml)
 [![Java](https://img.shields.io/badge/Java-25-E76F00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/25/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![Tests](https://img.shields.io/badge/tests-132%20passing-3fbf7f)](src/test/java)
+[![Tests](https://img.shields.io/badge/tests-138%20passing-3fbf7f)](src/test/java)
 [![License](https://img.shields.io/badge/license-MIT-9a94b8)](LICENSE)
 
 ### **[▸ Try the app](https://yt.rubenitx.me)** · **[Frontend repository →](https://github.com/rubenmtzb/yt-transcriber-web)**
@@ -85,6 +85,8 @@ It is a `GET` with query parameters rather than a `POST` with a body because the
 | `stage`   | `VALIDATING_URL`, `RESOLVING_VIDEO`, `TRANSCRIBING`, `TRANSLATING`, `PREPARING_RESULT` (raw, unquoted) |
 | `result`  | The same JSON body as the POST endpoint                                                       |
 | `error`   | The error envelope below                                                                     |
+
+Between two stage events nothing goes down the wire, and those gaps are long: resolving a video is allowed 120 seconds and the Speech-to-Text path runs for minutes. Cloudflare gives up on a proxied response that goes 100 seconds without a chunk, so the stream writes an SSE comment every 20 seconds to keep it open. The SSE grammar requires a reader to ignore comments, so `EventSource` never surfaces them and a client needs to know nothing about it.
 
 If the client closes the stream, the run is abandoned at the next stage boundary rather than carried to completion. Otherwise it would hold one of very few processing slots busy building a result nobody will read. An in-flight subprocess still finishes the stage it is on, since there is no cheap way to kill one mid-call.
 
@@ -210,7 +212,7 @@ Copy `.env.example` to `.env` and fill in the values you need locally.
 | `YTDLP_TIMEOUT_SECONDS`              | 120           | Timeout for each yt-dlp subprocess call. Generous on purpose: the resolve step is network-bound and a tight bound turns a slow response into an indistinguishable failure |
 | `WHISPER_BINARY_PATH`                | `whisper-cli` | Path to the whisper.cpp CLI executable                       |
 | `WHISPER_MODEL_PATH`                 | (empty)       | Path to a ggml model file. Empty disables local Speech-to-Text (videos with no captions in any language then fail with `PROVIDER_UNAVAILABLE` instead of transcribing) |
-| `WHISPER_TIMEOUT_SECONDS`            | 900           | Timeout for audio extraction + whisper-cli combined          |
+| `WHISPER_TIMEOUT_SECONDS`            | 900           | Timeout applied to each of the two subprocess calls on this path (audio extraction, then whisper-cli), so it bounds a stage rather than the run |
 | `WHISPER_MIN_AUDIO_DURATION_SECONDS` | 15            | Videos shorter than this skip Speech-to-Text (language auto-detection is unreliable on very short clips) |
 
 ### Rate limiting

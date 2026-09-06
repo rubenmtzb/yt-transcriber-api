@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -119,8 +120,11 @@ public class WhisperTranscriptionProvider implements TranscriptionProvider {
             throw new ProviderUnavailableException("The local transcription engine failed to process this video.");
         }
 
-        try {
-            return objectMapper.readValue(Files.readString(outputFile), WhisperOutput.class);
+        // Straight from the file rather than through Files.readString: whisper.cpp's JSON carries
+        // every token with its own offsets, which runs to megabytes on a long video, and the
+        // intermediate String is a second copy of all of it in UTF-16 for no gain.
+        try (InputStream json = Files.newInputStream(outputFile)) {
+            return objectMapper.readValue(json, WhisperOutput.class);
         } catch (Exception e) {
             throw new ProviderUnavailableException("Could not parse the transcription engine's output.", e);
         }
