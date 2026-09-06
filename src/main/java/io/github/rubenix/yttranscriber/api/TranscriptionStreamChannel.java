@@ -31,9 +31,11 @@ class TranscriptionStreamChannel {
      * <p>Stages are not evenly spaced: nothing at all goes down the wire between one stage event and
      * the next, and the gaps are long. Resolving a video is allowed 120 seconds, and the
      * Speech-to-Text path runs whisper-cli for minutes on a long video. Cloudflare, which proxies
-     * this deployment, gives up on a response that goes 100 seconds without a chunk -- so the
-     * quietest stretches were the ones that had already done nearly all the work, and they surfaced
-     * to the reader as "lost connection" with nothing to show for the wait.
+     * this deployment, applies a proxy read timeout to the origin connection -- 125 seconds by
+     * default -- and answers a 524 once a read takes longer than that. So the quietest stretches
+     * were the ones that had already done nearly all the work, and they surfaced to the reader as
+     * "lost connection" with nothing to show for the wait. Twenty seconds leaves room for the
+     * figure to be lower on another plan without this needing to be revisited.
      *
      * <p>A comment is the right shape for this: the SSE grammar defines it as a line to be ignored,
      * so {@code EventSource} never surfaces it and the frontend needs to know nothing about it. It

@@ -86,7 +86,7 @@ It is a `GET` with query parameters rather than a `POST` with a body because the
 | `result`  | The same JSON body as the POST endpoint                                                       |
 | `error`   | The error envelope below                                                                     |
 
-Between two stage events nothing goes down the wire, and those gaps are long: resolving a video is allowed 120 seconds and the Speech-to-Text path runs for minutes. Cloudflare gives up on a proxied response that goes 100 seconds without a chunk, so the stream writes an SSE comment every 20 seconds to keep it open. The SSE grammar requires a reader to ignore comments, so `EventSource` never surfaces them and a client needs to know nothing about it.
+Between two stage events nothing goes down the wire, and those gaps are long: resolving a video is allowed 120 seconds and the Speech-to-Text path runs for minutes. Cloudflare applies a proxy read timeout to the origin connection -- 125 seconds by default -- and answers a 524 once a read takes longer than that, so the stream writes an SSE comment every 20 seconds to keep it open. The SSE grammar requires a reader to ignore comments, so `EventSource` never surfaces them and a client needs to know nothing about it.
 
 If the client closes the stream, the run is abandoned at the next stage boundary rather than carried to completion. Otherwise it would hold one of very few processing slots busy building a result nobody will read. An in-flight subprocess still finishes the stage it is on, since there is no cheap way to kill one mid-call.
 
