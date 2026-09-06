@@ -1,6 +1,8 @@
 package io.github.rubenix.yttranscriber.integration.process;
 
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
+import io.github.rubenix.yttranscriber.application.ProcessingBudget;
+import io.github.rubenix.yttranscriber.exception.ProcessingTimeoutException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -46,5 +48,21 @@ class ExternalProcessRunnerTest {
     void throwsWhenTheBinaryDoesNotExist() {
         assertThatThrownBy(() -> runner.run(List.of("/nonexistent/binary-xyz"), Duration.ofSeconds(5)))
                 .isInstanceOf(ProviderUnavailableException.class);
+    }
+
+    @Test
+    void globalBudgetCapsALongerProcessTimeout() {
+        long start = System.nanoTime();
+        assertThatThrownBy(() -> ProcessingBudget.run(Duration.ofMillis(200),
+                () -> runner.run(List.of("sh", "-c", "exec sleep 5"), Duration.ofSeconds(10))))
+                .isInstanceOf(ProcessingTimeoutException.class);
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(3));
+    }
+
+    @Test
+    void expiredBudgetPreventsStartingAnotherProcess() {
+        assertThatThrownBy(() -> ProcessingBudget.run(Duration.ofNanos(1),
+                () -> runner.run(List.of("/nonexistent/binary-xyz"), Duration.ofSeconds(10))))
+                .isInstanceOf(ProcessingTimeoutException.class);
     }
 }

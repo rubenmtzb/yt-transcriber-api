@@ -1,5 +1,6 @@
 package io.github.rubenix.yttranscriber.integration.http;
 
+import io.github.rubenix.yttranscriber.application.ProcessingBudget;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -28,9 +29,11 @@ public class RestClientConfig {
                 .connectTimeout(CONNECT_TIMEOUT)
                 .build();
 
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(READ_TIMEOUT);
-
-        return RestClient.builder().requestFactory(requestFactory);
+        return RestClient.builder().requestFactory((uri, method) -> {
+            // Factories are per-call: mutating a shared timeout would mix concurrent budgets.
+            JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+            requestFactory.setReadTimeout(ProcessingBudget.cap(READ_TIMEOUT));
+            return requestFactory.createRequest(uri, method);
+        });
     }
 }

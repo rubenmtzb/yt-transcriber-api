@@ -9,6 +9,7 @@ import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.domain.translation.TranslatedSegment;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
+import io.github.rubenix.yttranscriber.exception.ProcessingTimeoutException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -146,5 +147,22 @@ class TranscriptionControllerTest {
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("PROVIDER_UNAVAILABLE"))
                 .andExpect(jsonPath("$.retryable").value(true));
+    }
+
+    @Test
+    void mapsTheGlobalDeadlineToARetryableGatewayTimeout() throws Exception {
+        when(transcriptionService.process(anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new ProcessingTimeoutException());
+
+        mockMvc.perform(post("/api/v1/transcriptions")
+                        .header("X-Request-Id", "timeout-test")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"youtubeUrl":"https://youtu.be/abc123","targetLanguage":"es"}
+                                """))
+                .andExpect(status().isGatewayTimeout())
+                .andExpect(jsonPath("$.code").value("PROCESSING_TIMEOUT"))
+                .andExpect(jsonPath("$.retryable").value(true))
+                .andExpect(jsonPath("$.requestId").value("timeout-test"));
     }
 }

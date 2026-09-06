@@ -9,6 +9,7 @@ import io.github.rubenix.yttranscriber.limiter.UsageLimiter;
 import io.github.rubenix.yttranscriber.limiter.UsageSnapshot;
 import io.github.rubenix.yttranscriber.domain.source.VideoMetadata;
 import io.github.rubenix.yttranscriber.exception.ProviderUnavailableException;
+import io.github.rubenix.yttranscriber.exception.ProcessingTimeoutException;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -81,6 +82,17 @@ class TranscriptionStreamTest {
     }
 
     @Test
+    void streamsAGlobalTimeoutAsARetryableErrorWithoutAResult() {
+        when(transcriptionService.process(eq("https://youtu.be/abc123"), eq("es"), any(), any(), any()))
+                .thenThrow(new ProcessingTimeoutException());
+
+        String body = get("https://youtu.be/abc123", "es");
+
+        assertThat(body).contains("event:error", "\"code\":\"PROCESSING_TIMEOUT\"", "\"retryable\":true");
+        assertThat(body).doesNotContain("event:result");
+    }
+
+    @Test
     void rejectsAMalformedYoutubeUrlWithAnOrdinaryBadRequestInsteadOfOpeningTheStream() {
         assertThatThrownBy(() -> get("not-a-url", "es"))
                 .isInstanceOf(HttpClientErrorException.BadRequest.class);
@@ -94,9 +106,12 @@ class TranscriptionStreamTest {
                 URLEncoder.encode(youtubeUrl, StandardCharsets.UTF_8),
                 URLEncoder.encode(targetLanguage, StandardCharsets.UTF_8));
         URI uri = URI.create("http://localhost:%d/api/v1/transcriptions/stream?%s".formatted(port, query));
-        return RestClient.create().get()
+        var response = RestClient.create().get()
                 .uri(uri)
                 .retrieve()
-                .body(String.class);
+                .toEntity(String.class);
+        assertThat(response.getHeaders().getFirst("Cache-Control")).isEqualTo("no-cache, no-transform");
+        assertThat(response.getHeaders().getFirst("X-Accel-Buffering")).isEqualTo("no");
+        return response.getBody();
     }
 }
