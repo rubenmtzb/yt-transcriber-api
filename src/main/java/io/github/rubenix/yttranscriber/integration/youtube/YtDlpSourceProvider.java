@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -130,46 +131,58 @@ public class YtDlpSourceProvider implements SourceProvider {
     }
 
     /**
-     * Picks the caption track to use as the transcript source, in order of trust: a manual
-     * (uploader-provided) track over an automatic one, and within automatic captions, the
-     * original ASR-detected language (the {@code <lang>-orig} key) over any other language key --
-     * every other key in {@code automatic_captions} is YouTube's own machine translation of the
-     * original track, and feeding one of those into DeepL would translate a translation instead
-     * of the source, compounding errors. Confirmed this schema empirically against real videos
-     * (an English one exposing "en-orig", a Spanish one exposing manual subs under a plain "es").
+     * Prefer the original language, using manual captions before ASR within that language.
+     * Only fall back to another manual language when the original has no usable track.
+     * An ASR {@code <lang>-orig} key supplies the original language when metadata omits it;
+     * the other automatic keys can be YouTube's machine translations, not original tracks.
      */
     Optional<CaptionTrack> selectCaptionTrack(RawVideoInfo info) {
-        Optional<String> manual = pickLanguage(keysOf(info.subtitles()), info.language());
+        Set<String> autoKeys = keysOf(info.automaticCaptions());
+        List<String> originalLanguages = autoKeys.stream()
+                .filter(key -> key.endsWith(AUTO_ORIGINAL_SUFFIX))
+                .map(key -> key.substring(0, key.length() - AUTO_ORIGINAL_SUFFIX.length()))
+                .filter(key -> CLEAN_LANGUAGE_CODE.matcher(key).matches())
+                .sorted()
+                .toList();
+        Optional<String> original = matchingLanguage(originalLanguages, info.language())
+                .or(() -> originalLanguages.stream().findFirst());
+        String preferredLanguage = info.language() != null && !info.language().isBlank()
+                ? info.language() : original.orElse(null);
+        List<String> manualLanguages = keysOf(info.subtitles()).stream()
+                .filter(key -> CLEAN_LANGUAGE_CODE.matcher(key).matches())
+                .sorted()
+                .toList();
+
+        Optional<String> manual = matchingLanguage(manualLanguages, preferredLanguage);
         if (manual.isPresent()) {
             return Optional.of(new CaptionTrack(manual.get(), true));
         }
 
-        Set<String> autoKeys = keysOf(info.automaticCaptions());
-        Optional<String> original = autoKeys.stream()
-                .filter(key -> key.endsWith(AUTO_ORIGINAL_SUFFIX))
-                .map(key -> key.substring(0, key.length() - AUTO_ORIGINAL_SUFFIX.length()))
-                .findFirst();
         if (original.isPresent()) {
             return Optional.of(new CaptionTrack(original.get(), false));
         }
-
         if (info.language() != null && autoKeys.contains(info.language())) {
             return Optional.of(new CaptionTrack(info.language(), false));
         }
 
-        return Optional.empty();
+        return manualLanguages.stream().findFirst().map(language -> new CaptionTrack(language, true));
     }
 
     private Set<String> keysOf(Map<String, Object> tracks) {
         return tracks != null ? tracks.keySet() : Set.of();
     }
 
-    private Optional<String> pickLanguage(Set<String> keys, String declaredLanguage) {
-        List<String> clean = keys.stream().filter(key -> CLEAN_LANGUAGE_CODE.matcher(key).matches()).sorted().toList();
-        if (declaredLanguage != null && clean.contains(declaredLanguage)) {
-            return Optional.of(declaredLanguage);
+    private Optional<String> matchingLanguage(List<String> languages, String preferred) {
+        if (preferred == null || preferred.isBlank()) {
+            return Optional.empty();
         }
-        return clean.stream().findFirst();
+        return languages.stream().filter(language -> language.equalsIgnoreCase(preferred)).findFirst()
+                .or(() -> languages.stream().filter(language -> primaryLanguage(language).equals(primaryLanguage(preferred)))
+                        .findFirst());
+    }
+
+    private String primaryLanguage(String language) {
+        return language.split("-", 2)[0].toLowerCase(Locale.ROOT);
     }
 
     private RawVideoInfo parse(String stdout) {
